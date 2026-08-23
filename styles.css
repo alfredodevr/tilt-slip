@@ -12,9 +12,13 @@
   --liquid-middle: #dc8b13;
   --liquid-bottom: #8c4504;
   --liquid-glow: rgba(255, 214, 104, 0.65);
+  --liquid-reflection: rgba(255, 236, 169, 0.22);
+  --liquid-opacity: 0.92;
   --foam-color: #fff9e8;
   --foam-shadow: #dbc99f;
   --foam-height: 38px;
+  --foam-scale: 1;
+  --foam-opacity: 1;
   --bubble-color: rgba(255, 248, 212, 0.7);
   --liquid-level: 18%;
   --liquid-angle: 0deg;
@@ -289,6 +293,7 @@ input:focus-visible {
 .text-button,
 .control-toggle,
 .motion-button,
+.action-button,
 .calibrate-button,
 .copy-button {
   border: 0;
@@ -374,6 +379,7 @@ input:focus-visible {
 .glass-wrap {
   position: relative;
   z-index: 2;
+  height: min(65vh, 660px);
   height: min(65dvh, 660px);
   max-height: 100%;
   aspect-ratio: 0.57;
@@ -385,6 +391,7 @@ input:focus-visible {
 
 .glass {
   position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   padding: 7px 8px 12px;
@@ -399,6 +406,19 @@ input:focus-visible {
   clip-path: polygon(3% 0, 97% 0, 86% 100%, 14% 100%);
 }
 
+.glass::after {
+  position: absolute;
+  inset: 3% 10% 6%;
+  z-index: 14;
+  background:
+    linear-gradient(108deg, transparent 7%, rgba(255, 255, 255, 0.2) 12%, transparent 20%),
+    linear-gradient(74deg, transparent 69%, rgba(220, 241, 250, 0.12) 75%, transparent 82%);
+  clip-path: polygon(2% 0, 98% 0, 88% 100%, 12% 100%);
+  content: "";
+  opacity: 0.58;
+  pointer-events: none;
+}
+
 .glass__interior {
   position: relative;
   width: 100%;
@@ -407,6 +427,9 @@ input:focus-visible {
   background:
     linear-gradient(100deg, rgba(255, 255, 255, 0.08), transparent 24% 76%, rgba(255, 255, 255, 0.06)),
     rgba(183, 205, 219, 0.028);
+  box-shadow:
+    inset 10px 0 18px rgba(255, 255, 255, 0.035),
+    inset -8px 0 16px rgba(184, 222, 238, 0.025);
   clip-path: polygon(2% 0, 98% 0, 88% 100%, 12% 100%);
 }
 
@@ -416,9 +439,11 @@ input:focus-visible {
   left: -30%;
   width: 160%;
   height: 145%;
-  background: linear-gradient(90deg, var(--liquid-bottom) 0%, var(--liquid-middle) 26%, var(--liquid-top) 52%, var(--liquid-middle) 76%, var(--liquid-bottom) 100%);
+  background:
+    linear-gradient(104deg, transparent 22%, var(--liquid-reflection) 39%, transparent 53%),
+    linear-gradient(90deg, var(--liquid-bottom) 0%, var(--liquid-middle) 26%, var(--liquid-top) 52%, var(--liquid-middle) 76%, var(--liquid-bottom) 100%);
   box-shadow: inset 0 25px 36px rgba(255, 255, 255, 0.05);
-  opacity: 1;
+  opacity: var(--liquid-opacity);
   transform: rotate(var(--liquid-angle));
   transform-origin: 50% 0;
   transition: opacity 160ms ease;
@@ -433,8 +458,8 @@ input:focus-visible {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at 50% 14%, var(--liquid-glow), transparent 34%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent 18% 82%, rgba(255, 255, 255, 0.05));
+    radial-gradient(ellipse at 50% 11%, var(--liquid-glow), transparent 32%),
+    linear-gradient(96deg, rgba(255, 255, 255, 0.13), transparent 17% 78%, rgba(255, 255, 255, 0.04));
   mix-blend-mode: screen;
   pointer-events: none;
 }
@@ -451,8 +476,10 @@ input:focus-visible {
   box-shadow:
     0 7px 15px rgba(39, 20, 2, 0.3),
     inset 0 5px 5px rgba(255, 255, 255, 0.44);
-  transform: scaleY(var(--surface-depth));
+  opacity: var(--foam-opacity);
+  transform: scale(var(--foam-scale), var(--surface-depth));
   transform-origin: 50% 50%;
+  transition: opacity 140ms ease;
 }
 
 .foam {
@@ -471,6 +498,8 @@ input:focus-visible {
   box-shadow:
     inset -2px -2px 4px rgba(116, 82, 35, 0.15),
     0 2px 5px rgba(39, 20, 2, 0.12);
+  opacity: var(--foam-cell-opacity, 1);
+  transform: scaleX(var(--foam-stretch, 1));
 }
 
 .bubbles {
@@ -490,6 +519,13 @@ input:focus-visible {
   box-shadow: inset 1px 1px 1px rgba(255, 255, 255, 0.38);
   opacity: 0;
   animation: bubble-rise var(--bubble-speed) linear var(--bubble-delay) infinite;
+  will-change: transform, opacity;
+}
+
+.liquid.is-empty .bubble,
+.app.is-background .bubble {
+  animation-play-state: paused;
+  opacity: 0;
 }
 
 @keyframes bubble-rise {
@@ -505,7 +541,7 @@ input:focus-visible {
   }
   100% {
     opacity: 0;
-    transform: translate3d(var(--bubble-drift), -560px, 0) scale(1.08);
+    transform: translate3d(var(--bubble-drift), -110vh, 0) scale(1.08);
   }
 }
 
@@ -595,7 +631,7 @@ input:focus-visible {
 
 .drink-actions__buttons {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   width: min(100%, 440px);
 }
@@ -636,6 +672,7 @@ input:focus-visible {
 }
 
 .motion-button,
+.action-button,
 .control-toggle {
   display: inline-flex;
   align-items: center;
@@ -651,6 +688,7 @@ input:focus-visible {
 }
 
 .motion-button {
+  grid-column: 1 / -1;
   border: 1px solid rgba(var(--accent-rgb), 0.72);
   color: #15130e;
   background: var(--accent);
@@ -679,6 +717,30 @@ input:focus-visible {
   border: 2px solid currentColor;
   border-radius: 50%;
   box-shadow: 0 0 0 3px rgba(19, 19, 15, 0.11);
+}
+
+.action-button {
+  border: 1px solid var(--line);
+  color: #d3d4d8;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.action-button:hover,
+.action-button:active {
+  border-color: rgba(var(--accent-rgb), 0.38);
+  color: #fff;
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.action-button__icon {
+  color: var(--accent);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.sound-button[aria-pressed="true"] {
+  color: #9b9fa8;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .control-toggle {
@@ -741,6 +803,7 @@ input:focus-visible {
   gap: 11px;
   width: 100%;
   max-width: 520px;
+  max-height: min(56vh, 590px);
   max-height: min(56dvh, 590px);
   margin: 4px auto 0;
   padding: 14px 15px 15px;
@@ -1041,6 +1104,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .drink-screen.controls-open .glass-wrap {
+  height: min(34vh, 390px);
   height: min(34dvh, 390px);
 }
 
@@ -1069,11 +1133,13 @@ input[type="range"]::-moz-range-thumb {
     right: max(24px, env(safe-area-inset-right));
     bottom: max(24px, env(safe-area-inset-bottom));
     width: 380px;
+    max-height: calc(100vh - 48px);
     max-height: calc(100dvh - 48px);
     margin: 0;
   }
 
   .drink-screen.controls-open .glass-wrap {
+    height: min(65vh, 660px);
     height: min(65dvh, 660px);
   }
 }
@@ -1088,17 +1154,20 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .glass-wrap {
+    height: min(59vh, 500px);
     height: min(59dvh, 500px);
   }
 
   .diagnostic-panel {
     gap: 7px;
+    max-height: 54vh;
     max-height: 54dvh;
     padding-top: 10px;
     padding-bottom: 10px;
   }
 
   .drink-screen.controls-open .glass-wrap {
+    height: min(31vh, 300px);
     height: min(31dvh, 300px);
   }
 }
@@ -1111,5 +1180,11 @@ input[type="range"]::-moz-range-thumb {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+
+  .bubble {
+    animation: none !important;
+    opacity: 0.18;
+    transform: none;
   }
 }

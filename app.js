@@ -1,6 +1,6 @@
 "use strict";
 
-const VERSION = "0.3.0";
+const VERSION = "1.0.0";
 const SENSOR_TIMEOUT_MS = 5000;
 const CALIBRATION_DURATION_MS = 550;
 const MIN_CALIBRATION_SAMPLES = 4;
@@ -23,15 +23,24 @@ const DRINKS = Object.freeze({
       middle: "#dc8b13",
       bottom: "#8c4504",
       glow: "rgba(255, 214, 104, 0.68)",
+      reflection: "rgba(255, 238, 174, 0.24)",
+      opacity: 0.9,
       bubble: "rgba(255, 248, 212, 0.72)"
     }),
     foam: Object.freeze({
       color: "#fff9e8",
       shadow: "#dbc99f",
-      height: 40,
-      cells: 14
+      height: 42,
+      cells: 15,
+      shrink: 0.14
     }),
-    bubbleCount: 24
+    bubbles: Object.freeze({
+      count: 18,
+      minimumSize: 1.4,
+      maximumSize: 4.2,
+      minimumSpeed: 4.2,
+      maximumSpeed: 7
+    })
   }),
   cola: Object.freeze({
     name: "Cola",
@@ -43,15 +52,24 @@ const DRINKS = Object.freeze({
       middle: "#35130e",
       bottom: "#090605",
       glow: "rgba(208, 72, 42, 0.55)",
+      reflection: "rgba(239, 92, 60, 0.2)",
+      opacity: 0.96,
       bubble: "rgba(237, 176, 128, 0.68)"
     }),
     foam: Object.freeze({
       color: "#d9b790",
       shadow: "#9d7653",
-      height: 32,
-      cells: 11
+      height: 27,
+      cells: 10,
+      shrink: 0.1
     }),
-    bubbleCount: 34
+    bubbles: Object.freeze({
+      count: 22,
+      minimumSize: 1.8,
+      maximumSize: 4.8,
+      minimumSpeed: 1.8,
+      maximumSpeed: 3.5
+    })
   })
 });
 
@@ -60,7 +78,8 @@ const state = {
   level: 0,
   sideTilt: 0,
   mouthTilt: 0,
-  diagnosticsOpen: false
+  diagnosticsOpen: false,
+  effectGeneration: 0
 };
 
 const motionState = {
@@ -87,7 +106,27 @@ const motionState = {
   simulationStatus: "ready",
   isRefilling: false,
   animationFrameId: null,
-  lastFrameTime: null
+  lastFrameTime: null,
+  lastDiagnosticsFrame: 0
+};
+
+const audioState = {
+  context: null,
+  masterGain: null,
+  gasGain: null,
+  drinkingGain: null,
+  sources: [],
+  interacted: false,
+  enabled: false,
+  muted: false,
+  unavailable: false,
+  masterTarget: null,
+  gasTarget: null,
+  drinkingTarget: null
+};
+
+const renderCache = {
+  cssVariables: new Map()
 };
 
 const elements = {
@@ -109,9 +148,12 @@ const elements = {
   mouthTiltControl: document.querySelector("#mouthTiltControl"),
   mouthTiltOutput: document.querySelector("#mouthTiltOutput"),
   backButton: document.querySelector("#backButton"),
-  refillButton: document.querySelector("#refillButton"),
+  refillButtons: document.querySelectorAll("[data-refill]"),
   controlsButton: document.querySelector("#controlsButton"),
   enableMotionButton: document.querySelector("#enableMotionButton"),
+  soundButton: document.querySelector("#soundButton"),
+  soundIcon: document.querySelector("#soundIcon"),
+  soundButtonLabel: document.querySelector("#soundButtonLabel"),
   calibrationCard: document.querySelector("#calibrationCard"),
   calibrationPrompt: document.querySelector("#calibrationPrompt"),
   calibrateButton: document.querySelector("#calibrateButton"),
@@ -137,6 +179,8 @@ const elements = {
 };
 
 const debugRequested = new URLSearchParams(window.location.search).get("debug") === "1";
+const prefersReducedMotion = typeof window.matchMedia === "function"
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
@@ -169,7 +213,255 @@ function seededFraction(seed) {
 }
 
 function setCssVariable(name, value) {
+  if (renderCache.cssVariables.get(name) === value) return;
+  renderCache.cssVariables.set(name, value);
   elements.app.style.setProperty(name, value);
+}
+
+function setTextContent(element, value) {
+  if (element.textContent !== value) element.textContent = value;
+}
+
+function setControlValue(element, value) {
+  if (element.value !== value) element.value = value;
+}
+
+function setAttributeValue(element, name, value) {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
+function currentFrameTime() {
+  return window.performance && typeof window.performance.now === "function"
+    ? window.performance.now()
+    : Date.now();
+}
+
+function updateSoundButton() {
+  if (audioState.unavailable) {
+    elements.soundButton.disabled = true;
+    elements.soundButtonLabel.textContent = "No audio";
+    elements.soundButton.setAttribute("aria-label", "Audio unavailable");
+    return;
+  }
+
+  elements.soundButton.disabled = false;
+  elements.soundButton.setAttribute("aria-pressed", String(audioState.muted));
+  elements.soundButton.setAttribute(
+    "aria-label",
+    audioState.muted ? "Unmute sound" : "Mute sound"
+  );
+  elements.soundButtonLabel.textContent = audioState.muted ? "Unmute" : "Mute";
+  elements.soundIcon.textContent = audioState.muted ? "×" : "♪";
+}
+
+function createNoiseBuffer(context) {
+  const sampleRate = context.sampleRate || 44100;
+  const buffer = context.createBuffer(1, sampleRate, sampleRate);
+  const samples = buffer.getChannelData(0);
+  let seed = 48271;
+
+  for (let index = 0; index < samples.length; index += 1) {
+    seed = seed * 16807 % 2147483647;
+    samples[index] = seed / 1073741823.5 - 1;
+  }
+
+  return buffer;
+}
+
+function createLoopingNoise(context, buffer, type, frequency, gainNode) {
+  const source = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+
+  source.buffer = buffer;
+  source.loop = true;
+  filter.type = type;
+  filter.frequency.value = frequency;
+  filter.Q.value = 0.7;
+  source.connect(filter);
+  filter.connect(gainNode);
+  source.start();
+
+  return source;
+}
+
+function createAudioEngine() {
+  if (audioState.context) return true;
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextClass !== "function") {
+    audioState.unavailable = true;
+    updateSoundButton();
+    return false;
+  }
+
+  let context = null;
+
+  try {
+    context = new AudioContextClass();
+    const masterGain = context.createGain();
+    const gasGain = context.createGain();
+    const drinkingGain = context.createGain();
+    const noiseBuffer = createNoiseBuffer(context);
+
+    masterGain.gain.value = 0;
+    gasGain.gain.value = 0;
+    drinkingGain.gain.value = 0;
+    gasGain.connect(masterGain);
+    drinkingGain.connect(masterGain);
+    masterGain.connect(context.destination);
+
+    const gasSource = createLoopingNoise(context, noiseBuffer, "highpass", 2600, gasGain);
+    const drinkingSource = createLoopingNoise(context, noiseBuffer, "bandpass", 850, drinkingGain);
+
+    audioState.context = context;
+    audioState.masterGain = masterGain;
+    audioState.gasGain = gasGain;
+    audioState.drinkingGain = drinkingGain;
+    audioState.sources = [gasSource, drinkingSource];
+    audioState.enabled = true;
+    updateSoundButton();
+    return true;
+  } catch {
+    if (context && typeof context.close === "function") {
+      void context.close().catch(() => {});
+    }
+    audioState.unavailable = true;
+    updateSoundButton();
+    return false;
+  }
+}
+
+function setAudioGain(gainNode, targetKey, target, duration = 0.08) {
+  const context = audioState.context;
+  if (!context || !gainNode || Math.abs((audioState[targetKey] ?? -1) - target) < 0.001) {
+    return;
+  }
+
+  audioState[targetKey] = target;
+  const now = context.currentTime;
+  gainNode.gain.cancelScheduledValues(now);
+  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+  gainNode.gain.linearRampToValueAtTime(target, now + duration);
+}
+
+function audioCanPlay() {
+  return Boolean(
+    audioState.interacted
+    && audioState.enabled
+    && !audioState.muted
+    && audioState.context
+    && audioState.context.state === "running"
+    && document.visibilityState !== "hidden"
+  );
+}
+
+function syncAudioForState() {
+  if (!audioState.context) return;
+
+  const audible = audioCanPlay();
+  const hasDrink = Boolean(state.drinkKey && state.level > 0);
+  const gasStrength = state.drinkKey === "cola" ? 0.018 : 0.014;
+  const gasLevel = clamp((state.level - 0.45) / 0.55, 0, 1);
+  const gasTarget = audible
+    && hasDrink
+    && motionState.simulationStatus === "ready"
+    && !motionState.isRefilling
+    ? gasStrength * (0.55 + gasLevel * 0.45)
+    : 0;
+  const drinkingTarget = audible
+    && hasDrink
+    && motionState.simulationStatus === "drinking"
+    ? 0.055
+    : 0;
+
+  setAudioGain(audioState.masterGain, "masterTarget", audible ? 0.7 : 0, 0.06);
+  setAudioGain(audioState.gasGain, "gasTarget", gasTarget, 0.12);
+  setAudioGain(audioState.drinkingGain, "drinkingTarget", drinkingTarget, 0.05);
+}
+
+function resumeAudioContext() {
+  const context = audioState.context;
+  if (!context || context.state === "closed") return;
+
+  if (context.state === "running") {
+    syncAudioForState();
+    return;
+  }
+
+  try {
+    const resumeResult = context.resume();
+    if (resumeResult && typeof resumeResult.then === "function") {
+      void resumeResult.then(syncAudioForState).catch(() => {});
+    }
+  } catch {
+    // Sound is optional; motion and manual controls remain available.
+  }
+}
+
+function enableAudioFromUserGesture() {
+  audioState.interacted = true;
+  if (!createAudioEngine()) return;
+  resumeAudioContext();
+}
+
+function playAudioCue(type) {
+  if (!audioCanPlay()) return;
+
+  const context = audioState.context;
+  const oscillator = context.createOscillator();
+  const cueGain = context.createGain();
+  const now = context.currentTime;
+  const isRefill = type === "refill";
+
+  oscillator.type = isRefill ? "sine" : "triangle";
+  oscillator.frequency.setValueAtTime(isRefill ? 280 : 190, now);
+  oscillator.frequency.exponentialRampToValueAtTime(isRefill ? 520 : 92, now + 0.18);
+  cueGain.gain.setValueAtTime(0.0001, now);
+  cueGain.gain.exponentialRampToValueAtTime(isRefill ? 0.055 : 0.045, now + 0.025);
+  cueGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+  oscillator.connect(cueGain);
+  cueGain.connect(audioState.masterGain);
+  oscillator.start(now);
+  oscillator.stop(now + 0.21);
+  oscillator.addEventListener("ended", () => {
+    oscillator.disconnect();
+    cueGain.disconnect();
+  }, { once: true });
+}
+
+function toggleMute() {
+  audioState.muted = !audioState.muted;
+  updateSoundButton();
+
+  if (!audioState.muted && audioState.interacted) {
+    resumeAudioContext();
+  } else {
+    syncAudioForState();
+  }
+
+  elements.liveStatus.textContent = audioState.muted ? "Sound muted." : "Sound unmuted.";
+}
+
+function handleVisibilityChange() {
+  const hidden = document.visibilityState === "hidden";
+  elements.app.classList.toggle("is-background", hidden);
+
+  if (hidden && audioState.context) {
+    setAudioGain(audioState.masterGain, "masterTarget", 0, 0.01);
+    try {
+      const suspendResult = audioState.context.suspend();
+      if (suspendResult && typeof suspendResult.catch === "function") {
+        void suspendResult.catch(() => {});
+      }
+    } catch {
+      // Browsers may already have suspended the context.
+    }
+    return;
+  }
+
+  if (!hidden && audioState.interacted && !audioState.muted) {
+    resumeAudioContext();
+  }
 }
 
 function applyDrinkTheme(drink) {
@@ -179,27 +471,33 @@ function applyDrinkTheme(drink) {
   setCssVariable("--liquid-middle", drink.colors.middle);
   setCssVariable("--liquid-bottom", drink.colors.bottom);
   setCssVariable("--liquid-glow", drink.colors.glow);
+  setCssVariable("--liquid-reflection", drink.colors.reflection);
+  setCssVariable("--liquid-opacity", String(drink.colors.opacity));
   setCssVariable("--bubble-color", drink.colors.bubble);
   setCssVariable("--foam-color", drink.foam.color);
   setCssVariable("--foam-shadow", drink.foam.shadow);
   setCssVariable("--foam-height", `${drink.foam.height}px`);
 }
 
-function createBubbles(count, seedOffset) {
+function createBubbles(drink, seedOffset) {
   const fragment = document.createDocumentFragment();
   elements.bubbles.replaceChildren();
 
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < drink.bubbles.count; index += 1) {
     const bubble = document.createElement("span");
     const seed = seedOffset + index * 7;
-    const size = 3 + seededFraction(seed) * 7;
+    const size = drink.bubbles.minimumSize
+      + seededFraction(seed) * (drink.bubbles.maximumSize - drink.bubbles.minimumSize);
+    const speed = drink.bubbles.minimumSpeed
+      + seededFraction(seed + 3)
+        * (drink.bubbles.maximumSpeed - drink.bubbles.minimumSpeed);
 
     bubble.className = "bubble";
     bubble.style.setProperty("--bubble-left", `${8 + seededFraction(seed + 1) * 84}%`);
     bubble.style.setProperty("--bubble-start", `${seededFraction(seed + 2) * 62}%`);
     bubble.style.setProperty("--bubble-size", `${size.toFixed(1)}px`);
-    bubble.style.setProperty("--bubble-speed", `${3.5 + seededFraction(seed + 3) * 4.5}s`);
-    bubble.style.setProperty("--bubble-delay", `${-seededFraction(seed + 4) * 8}s`);
+    bubble.style.setProperty("--bubble-speed", `${speed.toFixed(2)}s`);
+    bubble.style.setProperty("--bubble-delay", `${-seededFraction(seed + 4) * speed}s`);
     bubble.style.setProperty("--bubble-drift", `${-16 + seededFraction(seed + 5) * 32}px`);
     fragment.appendChild(bubble);
   }
@@ -220,24 +518,38 @@ function createFoamCells(count, seedOffset) {
     cell.style.setProperty("--foam-x", `${3 + seededFraction(seed + 1) * 90}%`);
     cell.style.setProperty("--foam-y", `${-15 + seededFraction(seed + 2) * 55}%`);
     cell.style.setProperty("--foam-size", `${size.toFixed(1)}px`);
+    cell.style.setProperty("--foam-stretch", (0.78 + seededFraction(seed + 3) * 0.55).toFixed(2));
+    cell.style.setProperty("--foam-cell-opacity", (0.72 + seededFraction(seed + 4) * 0.28).toFixed(2));
     fragment.appendChild(cell);
   }
 
   elements.foam.appendChild(fragment);
 }
 
+function regenerateDrinkEffects() {
+  const drink = DRINKS[state.drinkKey];
+  if (!drink) return;
+
+  state.effectGeneration += 1;
+  const drinkSeed = state.drinkKey === "beer" ? 100 : 300;
+  const generationSeed = state.effectGeneration * 1000;
+  createBubbles(drink, drinkSeed + generationSeed);
+  createFoamCells(drink.foam.cells, drinkSeed + generationSeed + 400);
+}
+
 function syncControls() {
   const fillPercent = Math.round(state.level * 100);
-  elements.fillControl.value = String(fillPercent);
-  elements.sideTiltControl.value = String(state.sideTilt);
-  elements.mouthTiltControl.value = String(state.mouthTilt);
-  elements.fillOutput.value = `${fillPercent}%`;
-  elements.sideTiltOutput.value = `${state.sideTilt}°`;
-  elements.mouthTiltOutput.value = `${state.mouthTilt}°`;
+  setControlValue(elements.fillControl, String(fillPercent));
+  setControlValue(elements.sideTiltControl, String(state.sideTilt));
+  setControlValue(elements.mouthTiltControl, String(state.mouthTilt));
+  setControlValue(elements.fillOutput, `${fillPercent}%`);
+  setControlValue(elements.sideTiltOutput, `${state.sideTilt}°`);
+  setControlValue(elements.mouthTiltOutput, `${state.mouthTilt}°`);
 }
 
 function renderLiquid(syncManualControls = true) {
   const usingMotion = motionState.inputMode === "motion" && motionState.calibrated;
+  const drink = DRINKS[state.drinkKey];
   const sideTilt = usingMotion
     ? clamp(-motionState.smoothedSide * 18 / MAX_SIDE_DEGREES, -18, 18)
     : state.sideTilt;
@@ -246,23 +558,32 @@ function renderLiquid(syncManualControls = true) {
   const visibleLevel = clamp(100 - state.level * 100 - mouthTilt * 0.12, -8, 100);
   const surfaceDepth = 0.58 + mouthTilt * 0.011;
   const glassPitch = mouthTilt * 0.08;
+  const foamScale = clamp(1 - (1 - state.level) * drink.foam.shrink, 0.78, 1);
+  const foamOpacity = state.level <= 0 ? 0 : clamp(0.64 + state.level * 0.36, 0, 1);
 
   setCssVariable("--liquid-level", `${visibleLevel.toFixed(2)}%`);
   setCssVariable("--liquid-angle", `${sideTilt.toFixed(2)}deg`);
   setCssVariable("--surface-depth", surfaceDepth.toFixed(2));
   setCssVariable("--glass-pitch", `${glassPitch.toFixed(2)}deg`);
+  setCssVariable("--foam-scale", foamScale.toFixed(3));
+  setCssVariable("--foam-opacity", foamOpacity.toFixed(3));
 
-  elements.liquid.classList.toggle("is-empty", state.level <= 0);
-  elements.fillReadout.textContent = `${fillPercent}%`;
-  elements.levelLabel.textContent = state.level <= 0 ? "empty" : "full";
-  elements.fillControl.value = String(fillPercent);
-  elements.fillOutput.value = `${fillPercent}%`;
-  elements.glassWrap.setAttribute(
+  const isEmpty = state.level <= 0;
+  if (elements.liquid.classList.contains("is-empty") !== isEmpty) {
+    elements.liquid.classList.toggle("is-empty", isEmpty);
+  }
+  setTextContent(elements.fillReadout, `${fillPercent}%`);
+  setTextContent(elements.levelLabel, isEmpty ? "empty" : "full");
+  setControlValue(elements.fillControl, String(fillPercent));
+  setControlValue(elements.fillOutput, `${fillPercent}%`);
+  setAttributeValue(
+    elements.glassWrap,
     "aria-label",
     `A glass of ${DRINKS[state.drinkKey].name.toLowerCase()}, ${fillPercent} percent full`
   );
 
   if (syncManualControls) syncControls();
+  syncAudioForState();
 }
 
 function setDiagnostics(open) {
@@ -270,6 +591,11 @@ function setDiagnostics(open) {
   elements.diagnosticPanel.hidden = !open;
   elements.controlsButton.setAttribute("aria-expanded", String(open));
   elements.drinkScreen.classList.toggle("controls-open", open);
+
+  if (open) {
+    renderMotionDiagnostics();
+    motionState.lastDiagnosticsFrame = currentFrameTime();
+  }
 }
 
 function selectDrink(drinkKey) {
@@ -286,8 +612,7 @@ function selectDrink(drinkKey) {
   elements.app.dataset.drink = drinkKey;
   elements.currentDrinkName.textContent = drink.name;
   applyDrinkTheme(drink);
-  createBubbles(drink.bubbleCount, drinkKey === "beer" ? 100 : 300);
-  createFoamCells(drink.foam.cells, drinkKey === "beer" ? 500 : 700);
+  regenerateDrinkEffects();
   renderLiquid();
   renderMotionDiagnostics();
   setDiagnostics(debugRequested);
@@ -306,6 +631,8 @@ function returnToChooser() {
   state.drinkKey = null;
   motionState.isRefilling = false;
   motionState.lastFrameTime = null;
+  setSimulationStatus("ready");
+  syncAudioForState();
 
   if (motionState.animationFrameId !== null) {
     window.cancelAnimationFrame(motionState.animationFrameId);
@@ -334,8 +661,12 @@ function refillGlass() {
 
   state.sideTilt = 0;
   state.mouthTilt = 0;
-  motionState.isRefilling = state.level < 1;
+  motionState.isRefilling = !prefersReducedMotion && state.level < 1;
+  regenerateDrinkEffects();
   setSimulationStatus("ready");
+
+  if (prefersReducedMotion) state.level = 1;
+  playAudioCue("refill");
 
   if (motionState.isRefilling) {
     setMotionMessage("Refilling…", "success");
@@ -377,6 +708,7 @@ function setMotionMessage(message, tone = "neutral") {
 
 function setSimulationStatus(status) {
   motionState.simulationStatus = status;
+  syncAudioForState();
 }
 
 function updateCalibrationUi(message = "") {
@@ -423,7 +755,7 @@ function updateCalculatedAngles() {
 }
 
 function stopDrinkingSound() {
-  // Version 0.3.0 has no audio source; this keeps the empty-state stop explicit.
+  setAudioGain(audioState.drinkingGain, "drinkingTarget", 0, 0.035);
 }
 
 function handleEmptyGlass() {
@@ -434,7 +766,13 @@ function handleEmptyGlass() {
   stopDrinkingSound();
   setMotionMessage("Empty — tap Refill", "warning");
 
+  if (state.diagnosticsOpen) {
+    renderMotionDiagnostics();
+    motionState.lastDiagnosticsFrame = currentFrameTime();
+  }
+
   if (!wasAlreadyEmpty && state.drinkKey) {
+    playAudioCue("empty");
     elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} is empty. Tap Refill.`;
   }
 }
@@ -461,7 +799,9 @@ function animateSimulation(timestamp) {
 
   updateCalculatedAngles();
 
-  const smoothing = 1 - Math.exp(-SMOOTHING_RESPONSE * deltaTime);
+  const smoothing = prefersReducedMotion
+    ? 1
+    : 1 - Math.exp(-SMOOTHING_RESPONSE * deltaTime);
   motionState.smoothedMouth += (
     motionState.calculatedMouth - motionState.smoothedMouth
   ) * smoothing;
@@ -521,11 +861,18 @@ function animateSimulation(timestamp) {
   }
 
   renderLiquid(false);
-  renderMotionDiagnostics();
+  if (state.diagnosticsOpen && timestamp - motionState.lastDiagnosticsFrame >= 100) {
+    renderMotionDiagnostics();
+    motionState.lastDiagnosticsFrame = timestamp;
+  }
 
   if (
     motionState.isRefilling
-    || (motionState.inputMode === "motion" && motionState.calibrated)
+    || (
+      motionState.inputMode === "motion"
+      && motionState.calibrated
+      && motionState.simulationStatus !== "empty"
+    )
   ) {
     motionState.animationFrameId = window.requestAnimationFrame(animateSimulation);
   } else {
@@ -534,21 +881,25 @@ function animateSimulation(timestamp) {
 }
 
 function renderMotionDiagnostics() {
-  elements.protocolValue.textContent = motionState.protocol;
-  elements.apiValue.textContent = motionState.apiAvailable ? "available" : "unavailable";
-  elements.permissionValue.textContent = motionState.permission;
+  setTextContent(elements.protocolValue, motionState.protocol);
+  setTextContent(elements.apiValue, motionState.apiAvailable ? "available" : "unavailable");
+  setTextContent(elements.permissionValue, motionState.permission);
   elements.permissionValue.dataset.status = motionState.permission;
-  elements.betaValue.textContent = formatAngle(motionState.beta);
-  elements.gammaValue.textContent = formatAngle(motionState.gamma);
-  elements.lastEventValue.textContent = formatEventTime(motionState.lastEvent);
-  elements.eventCountValue.textContent = String(motionState.eventCount);
-  elements.betaBaseValue.textContent = formatAngle(motionState.betaBase);
-  elements.gammaBaseValue.textContent = formatAngle(motionState.gammaBase);
-  elements.calculatedMouthValue.textContent = formatAngle(motionState.calculatedMouth);
-  elements.calculatedSideValue.textContent = formatAngle(motionState.calculatedSide);
-  elements.currentLevelValue.textContent = state.level.toFixed(3);
-  elements.simulationStateValue.textContent = motionState.simulationStatus;
-  elements.enableMotionButton.setAttribute("aria-pressed", String(motionState.listenerRegistered));
+  setTextContent(elements.betaValue, formatAngle(motionState.beta));
+  setTextContent(elements.gammaValue, formatAngle(motionState.gamma));
+  setTextContent(elements.lastEventValue, formatEventTime(motionState.lastEvent));
+  setTextContent(elements.eventCountValue, String(motionState.eventCount));
+  setTextContent(elements.betaBaseValue, formatAngle(motionState.betaBase));
+  setTextContent(elements.gammaBaseValue, formatAngle(motionState.gammaBase));
+  setTextContent(elements.calculatedMouthValue, formatAngle(motionState.calculatedMouth));
+  setTextContent(elements.calculatedSideValue, formatAngle(motionState.calculatedSide));
+  setTextContent(elements.currentLevelValue, state.level.toFixed(3));
+  setTextContent(elements.simulationStateValue, motionState.simulationStatus);
+  setAttributeValue(
+    elements.enableMotionButton,
+    "aria-pressed",
+    String(motionState.listenerRegistered)
+  );
 }
 
 function handleDeviceOrientation(event) {
@@ -572,7 +923,12 @@ function handleDeviceOrientation(event) {
     setMotionMessage("Motion data received. Hold your phone upright and tap Calibrate.", "success");
   }
 
-  renderMotionDiagnostics();
+  updateCalculatedAngles();
+  const timestamp = currentFrameTime();
+  if (state.diagnosticsOpen && timestamp - motionState.lastDiagnosticsFrame >= 100) {
+    renderMotionDiagnostics();
+    motionState.lastDiagnosticsFrame = timestamp;
+  }
 }
 
 function finishCalibration() {
@@ -676,6 +1032,14 @@ function registerOrientationListener() {
 }
 
 function diagnosticsText() {
+  const soundStatus = audioState.unavailable
+    ? "unavailable"
+    : audioState.muted
+      ? "muted"
+      : audioState.interacted
+        ? "on"
+        : "not-started";
+
   return [
     "TiltSip motion diagnostics",
     `Version: ${VERSION}`,
@@ -692,7 +1056,8 @@ function diagnosticsText() {
     `Side tilt: ${formatAngle(motionState.calculatedSide)}`,
     `Current level: ${state.level.toFixed(3)}`,
     `State: ${motionState.simulationStatus}`,
-    `Invert drinking direction: ${motionState.invertDirection ? "yes" : "no"}`
+    `Invert drinking direction: ${motionState.invertDirection ? "yes" : "no"}`,
+    `Sound: ${soundStatus}`
   ].join("\n");
 }
 
@@ -723,7 +1088,7 @@ async function copyDiagnostics() {
 
     elements.copyDiagnosticsButton.textContent = "Copied";
     elements.liveStatus.textContent = "Motion diagnostics copied.";
-  } catch (error) {
+  } catch {
     elements.copyDiagnosticsButton.textContent = "Copy failed";
     elements.liveStatus.textContent = "Motion diagnostics could not be copied automatically.";
     setMotionMessage("Copy failed. You can still read every diagnostic value in this panel.", "warning");
@@ -755,7 +1120,10 @@ function bindEvents() {
   });
 
   elements.backButton.addEventListener("click", returnToChooser);
-  elements.refillButton.addEventListener("click", refillGlass);
+  elements.refillButtons.forEach((button) => {
+    button.addEventListener("click", refillGlass);
+  });
+  elements.soundButton.addEventListener("click", toggleMute);
   elements.controlsButton.addEventListener("click", () => setDiagnostics(!state.diagnosticsOpen));
   elements.copyDiagnosticsButton.addEventListener("click", () => {
     void copyDiagnostics();
@@ -799,12 +1167,25 @@ function bindEvents() {
     renderLiquid();
   });
 
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
   // Permission remains inside this click handler to preserve transient user activation.
   elements.enableMotionButton.addEventListener("click", async () => {
     try {
       const OrientationEvent = window.DeviceOrientationEvent;
+      const permissionPromise = (
+        typeof OrientationEvent !== "undefined"
+        && OrientationEvent !== null
+        && !motionState.listenerRegistered
+        && typeof OrientationEvent.requestPermission === "function"
+      )
+        ? OrientationEvent.requestPermission()
+        : null;
 
-      if (typeof OrientationEvent === "undefined") {
+      // Audio creation and resume stay inside the same direct user gesture.
+      enableAudioFromUserGesture();
+
+      if (typeof OrientationEvent === "undefined" || OrientationEvent === null) {
         motionState.apiAvailable = false;
         motionState.permission = "not-required";
         setMotionMessage(
@@ -812,7 +1193,6 @@ function bindEvents() {
           "warning"
         );
         renderMotionDiagnostics();
-        setDiagnostics(true);
         return;
       }
 
@@ -827,12 +1207,11 @@ function bindEvents() {
         );
         updateCalibrationUi();
         renderMotionDiagnostics();
-        setDiagnostics(true);
         return;
       }
 
-      if (typeof OrientationEvent.requestPermission === "function") {
-        const permissionResult = await OrientationEvent.requestPermission();
+      if (permissionPromise) {
+        const permissionResult = await permissionPromise;
 
         if (permissionResult !== "granted") {
           motionState.permission = "denied";
@@ -841,37 +1220,35 @@ function bindEvents() {
             "warning"
           );
           renderMotionDiagnostics();
-          setDiagnostics(true);
           return;
         }
 
         motionState.permission = "granted";
         registerOrientationListener();
         renderMotionDiagnostics();
-        setDiagnostics(true);
         return;
       }
 
       motionState.permission = "not-required";
       registerOrientationListener();
       renderMotionDiagnostics();
-      setDiagnostics(true);
-    } catch (error) {
+    } catch {
       motionState.permission = "error";
       setMotionMessage(
         "Motion could not be enabled. Manual controls remain fully functional; verify HTTPS and the site sensor permission.",
         "error"
       );
       renderMotionDiagnostics();
-      setDiagnostics(true);
     }
   });
 }
 
 function initialize() {
   motionState.protocol = window.location.protocol === "https:" ? "HTTPS" : "Not HTTPS";
-  motionState.apiAvailable = typeof window.DeviceOrientationEvent !== "undefined";
+  motionState.apiAvailable = typeof window.DeviceOrientationEvent !== "undefined"
+    && window.DeviceOrientationEvent !== null;
   elements.versionLabel.textContent = `v${VERSION}`;
+  updateSoundButton();
   renderMotionDiagnostics();
   bindEvents();
 }

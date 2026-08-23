@@ -1,8 +1,8 @@
-# TiltSip 0.3.0 — bebida por inclinación
+# TiltSip 1.0.0 — versión auditada
 
-TiltSip es una experiencia web móvil original que simula un vaso con líquido. Conserva la interfaz visual y el diagnóstico de sensores de las fases anteriores, y ahora conecta `DeviceOrientationEvent` con la simulación después de una calibración explícita.
+TiltSip es una experiencia web móvil original que simula beber de un vaso. La versión 1.0.0 reúne la selección Beer/Cola, el modo manual, el permiso y diagnóstico de orientación, la calibración, el consumo por inclinación, el acabado visual y los sonidos originales generados en el navegador.
 
-La aplicación está pensada principalmente para un teléfono en orientación vertical. El modo manual continúa disponible en computador y también funciona como alternativa cuando el sensor no existe, el permiso se niega o no llegan datos.
+La experiencia principal está optimizada para un teléfono en orientación vertical. El modo manual sigue funcionando en computador y cuando el sensor no existe, el permiso se niega o no llegan datos.
 
 ## Archivos
 
@@ -14,11 +14,11 @@ tilt-sip/
 └── README.md
 ```
 
-Solo usa HTML, CSS y JavaScript puro. No necesita React, npm, backend, base de datos ni dependencias externas. Las rutas `./styles.css` y `./app.js` son relativas y funcionan bajo `/tilt-sip/` en GitHub Pages.
+Solo usa HTML, CSS y JavaScript puro. No contiene imágenes, sonidos descargados, librerías ni dependencias externas. Las rutas `./styles.css` y `./app.js` son relativas para funcionar bajo `/tilt-sip/` en GitHub Pages.
 
 ## Cómo abrirlo en un computador
 
-Puede abrir `index.html` directamente. Para probarlo con un servidor local, abra una terminal en la carpeta `tilt-sip` y ejecute:
+Puede abrir `index.html` directamente. Para probarlo mediante un servidor local, abra una terminal en la carpeta `tilt-sip` y ejecute:
 
 ```bash
 python3 -m http.server 8000
@@ -30,108 +30,155 @@ En Windows también puede usar:
 py -m http.server 8000
 ```
 
-Después visite `http://localhost:8000`. En computador, use **Controls & diagnostics** para cambiar Fill level, Side tilt y Tilt to mouth. Los sensores pueden no estar disponibles sobre HTTP, pero el modo manual no depende de ellos.
+Después visite `http://localhost:8000`. Los sensores pueden no entregar datos sobre HTTP, pero Beer, Cola, Refill, sonido y los controles manuales no dependen del sensor.
 
-## Qué implementa la versión 0.3.0
+## Comportamiento conservado
 
-- Mantiene Beer y Cola, con colores, espuma y burbujas definidos en el objeto central `DRINKS`.
-- Mantiene el líquido y la espuma recortados dentro del vaso.
-- Solicita el permiso de orientación solamente al pulsar **Enable Motion**.
-- Conserva la detección por funcionalidad y el aviso de cinco segundos cuando no llegan eventos válidos.
-- Muestra “Hold your phone upright and tap Calibrate” antes de calibrar.
-- Recoge lecturas válidas durante unos 550 ms y calcula las referencias de beta y gamma mediante un promedio angular.
-- Normaliza las diferencias angulares y limita valores extremos.
-- Usa beta respecto a la referencia para detectar la inclinación hacia la boca.
-- Usa gamma respecto a la referencia para inclinar la superficie sin consumir líquido.
-- Suaviza el movimiento visual y procesa la simulación con `requestAnimationFrame`.
-- Calcula el vaciado con `deltaTime`, independientemente de la frecuencia de la pantalla.
-- Empieza a beber al superar 18°; una inclinación leve consume despacio y una profunda consume hasta 0.20 del vaso por segundo.
-- Un vaso al 100 % tarda aproximadamente 5 segundos en vaciarse con una inclinación profunda sostenida.
-- Limita siempre el nivel interno al intervalo de `0` a `1`.
-- Detiene el estado de consumo al enderezar el teléfono y muestra **Empty — tap Refill** al llegar a cero.
-- Anima **Refill** hasta el 100 % y vuelve a mostrar Calibrate cuando aún no existe una calibración válida.
-- Permite activar **Invert drinking direction** si el signo de beta es contrario en un dispositivo.
-- Mantiene todos los controles manuales; mover cualquiera de ellos pasa la simulación a modo manual. Pulse **Recalibrate** para volver al sensor.
-- Muestra la versión `0.3.0` en diagnóstico.
+- Permiso de `DeviceOrientationEvent` solicitado solamente desde el click de **Enable Motion**.
+- Listener registrado únicamente después de `granted` cuando el navegador exige permiso.
+- Eventos con beta o gamma inválidos ignorados.
+- Aviso después de cinco segundos sin datos y modo manual siempre disponible.
+- Calibración de varias lecturas durante aproximadamente 550 ms.
+- Diferencias angulares normalizadas y limitadas.
+- Beta controla la inclinación hacia la boca; gamma inclina visualmente la superficie.
+- Suavizado y consumo procesados con `requestAnimationFrame` y `deltaTime`.
+- Umbral de 18° y vaciado profundo de aproximadamente cinco segundos desde 100 %.
+- Nivel limitado entre `0` y `1`, espuma unida a la superficie y mensaje **Empty — tap Refill**.
+- **Invert drinking direction**, diagnóstico copiable y cambio funcional entre Beer y Cola.
 
-TiltSip no genera audio en esta fase. Al quedar vacío cancela explícitamente el estado `drinking`. Tampoco usa magnetómetro, geolocalización, cámara ni micrófono, y no recopila ni envía datos.
+## Acabado visual
 
-## Flujo de permiso y calibración
+El objeto central `DRINKS` continúa controlando los efectos sin duplicar la simulación:
 
-1. Seleccione Beer o Cola.
-2. Pulse **Enable Motion**. El permiso nunca se solicita al cargar la página.
-3. Si el navegador exige `DeviceOrientationEvent.requestPermission()`, TiltSip lo llama directamente dentro de ese click y registra el listener solamente si devuelve `granted`.
-4. Si el método no existe, registra directamente el listener. Si la API no existe o el permiso falla, mantiene el modo manual.
-5. Sostenga el teléfono vertical, quieto y en la posición natural desde la que va a beber.
-6. Pulse **Calibrate** y manténgalo quieto durante aproximadamente medio segundo.
-7. Cuando el estado sea `ready`, acerque el borde superior del teléfono hacia la boca. Enderécelo para detener el consumo.
-8. Si el nivel no baja en la dirección esperada, active **Invert drinking direction** en el panel y vuelva a probar. Puede pulsar **Recalibrate** cuando cambie su postura.
+- **Beer:** ámbar semitransparente, reflejo cálido, espuma blanca más alta e irregular y 18 burbujas finas de movimiento tranquilo.
+- **Cola:** marrón casi negro, brillo rojizo, espuma beige más delgada y 22 burbujas pequeñas más rápidas.
+- Las burbujas se crean con elementos HTML y CSS, quedan recortadas dentro del líquido y desaparecen al superar la superficie o cuando el vaso está vacío.
+- La espuma disminuye ligeramente con el nivel.
+- Cada pulsación de **Refill** recrea burbujas y espuma con una distribución nueva.
+- El vidrio incorpora reflejos laterales y diagonales sutiles.
+- Si el sistema tiene `prefers-reduced-motion: reduce`, las burbujas quedan estáticas, las transiciones se reducen y Refill se completa sin animación prolongada.
 
-## Diagnóstico
+El máximo es de 22 burbujas animadas, lo que limita el trabajo gráfico en teléfonos.
 
-Abra **Controls & diagnostics** o añada `?debug=1` a la dirección. El panel muestra:
+## Sonido original con Web Audio API
 
-- protocolo HTTPS o no;
-- disponibilidad de la API;
-- permiso;
-- beta y gamma actuales;
-- hora y número de eventos;
-- beta base y gamma base;
-- inclinación calculada hacia la boca;
-- inclinación lateral calculada;
-- nivel actual entre `0.000` y `1.000`;
-- estado `calibrating`, `ready`, `drinking` o `empty`;
-- control **Invert drinking direction**;
-- versión `0.3.0`.
+No existen archivos de audio. TiltSip genera ruido y tonos directamente mediante Web Audio API:
 
-**Copy diagnostics** copia todos esos valores en texto.
+- gas suave cuando queda suficiente bebida y el estado es `ready`;
+- ruido filtrado de sorbo o vertido durante `drinking`;
+- tono corto descendente al quedar vacío;
+- tono corto ascendente al pulsar Refill;
+- botón visible **Mute/Unmute**.
+
+El `AudioContext` se crea o reanuda directamente desde **Enable Motion**. Antes de esa interacción no se crea el motor de audio ni se reproduce sonido. Si la página pasa a segundo plano, el contexto se suspende y las burbujas se pausan; al regresar puede reanudarse únicamente si ya hubo una interacción y el sonido no está silenciado.
+
+El sonido es complementario: si Web Audio no está disponible o falla, los sensores y controles manuales siguen funcionando.
+
+## Interfaz y diagnóstico
+
+Enable Motion, Refill, Mute y Diagnostics están agrupados en la parte inferior para poder alcanzarlos con el pulgar. También se conserva el Refill superior.
+
+El panel de diagnóstico permanece oculto por defecto. Ábralo con **Diagnostics** o añada `?debug=1` a la dirección:
+
+```text
+http://localhost:8000/?debug=1
+```
+
+Muestra protocolo, API, permiso, beta, gamma, hora y cantidad de eventos, referencias base, inclinaciones calculadas, nivel, estado, dirección invertida y versión `1.0.0`. **Copy diagnostics** también incluye el estado del sonido.
 
 ## Prueba exacta en computador
 
-1. Abra `http://localhost:8000/?debug=1`.
-2. Elija Beer y confirme que el nivel inicial sea `0.820`; vuelva y elija Cola para confirmar `0.780` y un aspecto claramente diferente.
-3. Mueva **Fill level** hasta 0 y 100. Confirme que el líquido no sale del vaso y que la espuma acompaña a la superficie.
-4. Mueva **Side tilt** de -18° a 18° y **Tilt to mouth** de 0° a 60°.
-5. Pulse **Refill** desde un nivel bajo y compruebe que el llenado se anima hasta `1.000`.
-6. Pulse **Enable Motion**. Si el computador no ofrece la API o no entrega datos, confirme el mensaje útil y que todos los controles manuales continúan funcionando.
-7. Pulse **Copy diagnostics** y pegue el texto en un editor.
-8. Abra la consola y confirme que no aparecen errores.
+1. Abra `http://localhost:8000` y confirme que el panel diagnóstico esté oculto.
+2. Elija Beer. Confirme líquido ámbar transparente, espuma blanca irregular y burbujas finas.
+3. Vuelva y elija Cola. Confirme líquido casi negro con reflejo rojo, espuma beige más delgada y burbujas más rápidas.
+4. Pulse **Enable Motion**. Aunque el computador no tenga datos de orientación, debe comenzar el audio y el modo manual debe continuar disponible.
+5. Pulse **Mute** y **Unmute**; el sonido debe apagarse y regresar sin afectar el vaso.
+6. Abra **Diagnostics** y mueva Fill level, Side tilt y Tilt to mouth.
+7. Lleve Fill level a cero. Confirme que desaparecen líquido, espuma y burbujas, aparece `empty` y suena una señal corta si el audio está activo.
+8. Pulse el Refill inferior. Confirme llenado hasta `1.000`, señal corta y una distribución nueva de espuma y burbujas.
+9. Cambie entre Beer y Cola y repita Refill.
+10. Pulse **Copy diagnostics** y revise que muestre versión `1.0.0` y estado del sonido.
+11. Cambie el sistema a “reducir movimiento”, recargue la página y confirme burbujas estáticas y Refill inmediato.
+12. Abra la consola y confirme que no aparecen errores.
 
 ## Prueba exacta en iPhone con Safari
 
-1. Publique el proyecto en GitHub Pages y abra la dirección `https://...` directamente en Safari, con el iPhone en vertical.
-2. Elija Beer y pulse **Enable Motion**.
-3. En el diálogo de iOS, pulse **Allow**. Confirme `Permission: granted`.
-4. Mantenga el iPhone vertical y quieto; pulse **Calibrate** y espere a que el estado pase de `calibrating` a `ready`.
-5. Confirme que beta base y gamma base tienen valores y que, estando vertical, el nivel no baja.
-6. Incline solo a izquierda y derecha. Confirme que cambia Side tilt y se inclina la superficie, pero el nivel permanece igual.
-7. Acerque gradualmente el borde superior del iPhone hacia la boca. Confirme `drinking` y que el nivel baja más rápido con una inclinación profunda.
-8. Enderece el iPhone. Confirme que el estado vuelve inmediatamente a `ready` y el nivel deja de bajar.
-9. Mantenga una inclinación profunda: desde el 100 %, el vaciado debe tardar aproximadamente entre 4 y 7 segundos.
-10. Al llegar a cero, confirme `empty` y el mensaje **Empty — tap Refill**.
-11. Pulse **Refill** y confirme la animación hasta `1.000`. Si aparece la instrucción de calibración, sostenga el iPhone vertical y vuelva a calibrar.
-12. Si el vaso solo bebe al inclinarlo en la dirección contraria, active **Invert drinking direction**.
-13. Vuelva a Drinks, cambie a Cola y repita calibración, inclinación y Refill.
-14. Mueva un control manual para activar la alternativa manual; pulse **Recalibrate** para volver al sensor.
-15. Repita negando el permiso. Confirme que no se registra el listener, no se bloquea la aplicación y el modo manual funciona.
-16. Pulse **Copy diagnostics** y compruebe el texto copiado.
+1. Publique el proyecto en GitHub Pages y abra la URL `https://...` directamente en Safari, con el iPhone vertical.
+2. Elija Beer y pulse **Enable Motion**. Acepte el permiso de movimiento.
+3. Confirme que el diagnóstico no se abre automáticamente y que el sonido suave comienza solamente después del click.
+4. Mantenga el iPhone vertical y quieto; pulse **Calibrate** y espere `calibrating → ready`.
+5. Déjelo vertical varios segundos: el nivel no debe bajar.
+6. Incline solo a izquierda y derecha: la superficie debe responder sin consumir.
+7. Acerque el borde superior hacia la boca: debe aparecer `drinking`, sonar el vertido y bajar el nivel.
+8. Enderece el iPhone: el consumo y el sonido de vertido deben detenerse inmediatamente.
+9. Mantenga una inclinación profunda desde 100 %: debe vaciarse aproximadamente en 4–7 segundos.
+10. Confirme el tono final, `empty` y **Empty — tap Refill**.
+11. Pulse Refill: confirme tono corto, llenado al 100 % y espuma nueva.
+12. Pruebe Mute/Unmute durante `ready` y `drinking`.
+13. Envíe Safari al segundo plano: el sonido debe detenerse. Regrese y confirme que no hubo reproducción mientras estaba oculto.
+14. Cambie a Cola y repita calibración, inclinación lateral, consumo, vacío y Refill.
+15. Si el signo es contrario, active **Invert drinking direction**.
+16. Repita negando el permiso: debe aparecer el mensaje útil y el modo manual debe seguir completamente funcional.
 
 ## Prueba exacta en Android con Chrome
 
-1. Publique el proyecto en GitHub Pages y abra la dirección `https://...` directamente en Chrome, con el teléfono en vertical.
-2. Elija Cola y pulse **Enable Motion**.
-3. Si Chrome solicita permiso, acéptelo. Si no necesita ese método, confirme `Permission: not-required` y que beta/gamma cambian.
-4. Mantenga el teléfono vertical y quieto; pulse **Calibrate** hasta obtener el estado `ready` y referencias base numéricas.
-5. Déjelo vertical durante varios segundos y confirme que el nivel no baja.
-6. Incline solo a izquierda y derecha. Confirme que la superficie responde y el nivel no cambia.
-7. Incline el borde superior hacia la boca, primero poco y luego más. Confirme que el consumo comienza sobre el umbral y se acelera con una inclinación profunda.
-8. Enderece el teléfono y confirme que el nivel se detiene inmediatamente.
-9. Compruebe un vaciado profundo desde 100 %: debe durar aproximadamente entre 4 y 7 segundos.
-10. Confirme `empty`, **Empty — tap Refill** y Refill animado hasta `1.000`.
-11. Pruebe **Invert drinking direction** si el signo es contrario.
-12. Cambie entre Beer y Cola y confirme que ambos siguen funcionando.
-13. Mueva los tres controles manuales y confirme que siguen siendo una alternativa completa.
-14. Bloquee el permiso o pruebe un dispositivo sin datos: después de cinco segundos debe aparecer el aviso y el modo manual debe seguir funcionando.
-15. Pulse **Copy diagnostics** y revise que incluya bases, inclinaciones, nivel, estado y versión.
+1. Abra la URL HTTPS de GitHub Pages directamente en Chrome, con el teléfono vertical.
+2. Elija Cola y pulse **Enable Motion**. Acepte el permiso si aparece; si no se necesita, confirme `not-required`.
+3. Confirme que no había sonido antes del click y que el panel diagnóstico sigue cerrado.
+4. Calibre con el teléfono vertical y quieto hasta obtener `ready` y referencias base.
+5. Compruebe que la vertical no consume y que la inclinación exclusivamente lateral solo mueve la superficie.
+6. Incline el borde superior hacia la boca: deben activarse `drinking`, el sonido de vertido y el consumo gradual.
+7. Enderece el teléfono y confirme la detención inmediata del consumo y del sonido.
+8. Compruebe un vaciado profundo en aproximadamente 4–7 segundos, la señal de vacío y el mensaje final.
+9. Pulse Refill y confirme espuma/burbujas nuevas, señal corta y nivel `1.000`.
+10. Pruebe Mute/Unmute, segundo plano y regreso a la página.
+11. Cambie entre Beer y Cola y confirme sus diferencias visuales.
+12. Pruebe **Invert drinking direction** si fuera necesario.
+13. Bloquee el sensor o espere sin datos: después de cinco segundos debe aparecer el aviso y el modo manual debe continuar funcionando.
+14. Abra Diagnostics, copie el diagnóstico y revise nivel, estado, referencias, sonido y versión.
 
-Estas listas describen las pruebas que debe realizar en dispositivos físicos; no sustituyen una comprobación real en su modelo concreto de iPhone o Android.
+No se usan magnetómetro, orientación absoluta, geolocalización, cámara ni micrófono. La aplicación no recopila ni envía datos.
+
+## Auditoría final 1.0.0
+
+La auditoría de código se completó sin añadir funciones. Las correcciones se limitaron a problemas verificables:
+
+- el panel diagnóstico deja de modificar el DOM con cada evento del sensor cuando está oculto y se limita aproximadamente a 10 actualizaciones por segundo cuando está visible;
+- las variables CSS, textos, valores de controles y atributos no se vuelven a escribir cuando su valor no cambió;
+- el diagnóstico actualiza inmediatamente el estado `empty`, incluso si el último fotograma cae entre dos intervalos del panel;
+- las medidas con `dvh` tienen respaldo con `vh` para navegadores que no entienden unidades dinámicas;
+- el mensaje de movimiento se anuncia como estado y el botón Calibrate queda relacionado con su instrucción;
+- se retiraron referencias internas y parámetros de error que no se utilizaban.
+
+Se comprobaron sintaxis, estructura HTML, rutas relativas, ausencia de recursos externos y credenciales, recorte del vaso, configuración compartida de Beer/Cola, permiso directo desde click, escenarios `granted`, `denied`, `not-required`, `error` y API ausente, valores inválidos, espera de cinco segundos sin eventos, listener único, calibración con múltiples muestras, normalización, suavizado, `requestAnimationFrame`, `deltaTime`, dirección invertida, inclinación lateral sin consumo, detención al enderezar, vaciado profundo, Refill, copia de diagnóstico, modo manual, mute, suspensión en segundo plano y reducción de movimiento. El conjunto automatizado contiene 136 comprobaciones y no produjo errores sin capturar.
+
+## Lista final de pruebas antes de publicar
+
+### Completadas en la auditoría de código
+
+- [x] `app.js` tiene sintaxis válida y no contiene referencias conocidas sin uso.
+- [x] `index.html` no tiene identificadores duplicados y todos los elementos consultados por JavaScript existen.
+- [x] `./styles.css` y `./app.js` funcionan como rutas relativas bajo `/tilt-sip/`.
+- [x] No se cargan recursos HTTP/HTTPS externos ni existen patrones de claves o secretos.
+- [x] El permiso se invoca dentro del click de Enable Motion, antes del primer `await` y sin temporizador.
+- [x] El listener se registra después de `granted`, o directamente cuando `requestPermission` no existe, y nunca se duplica.
+- [x] API ausente, permiso denegado, valores `null` o no numéricos y ausencia de eventos conservan el modo manual.
+- [x] Calibración, normalización, suavizado, límites, `requestAnimationFrame` y consumo con `deltaTime` pasan la simulación.
+- [x] Inclinación lateral aislada no consume; enderezar detiene el consumo; una inclinación profunda sostenida vacía gradualmente.
+- [x] Beer y Cola usan la misma lógica mediante `DRINKS` y respetan su configuración visual.
+- [x] Líquido, espuma y burbujas permanecen recortados dentro del vaso según la estructura y las reglas CSS.
+- [x] El audio solo se crea después de Enable Motion; mute y suspensión al ocultar la página pasan la simulación.
+- [x] El diagnóstico oculto no recibe escrituras por cada evento y el visible queda limitado aproximadamente a 10 Hz.
+- [x] Existen `100vh`/`100dvh`, `safe-area-inset`, bloqueo del desplazamiento y reglas de `prefers-reduced-motion`.
+
+### Pendientes en dispositivos físicos
+
+Estas pruebas no se declaran completadas porque requieren hardware real:
+
+- [ ] **iPhone Safari:** confirmar el cuadro de permiso del sistema, lecturas beta/gamma reales, signo de la inclinación, safe areas con notch/Dynamic Island y audio por altavoz.
+- [ ] **iPhone Safari:** confirmar que una inclinación profunda sostenida tarda entre 4 y 7 segundos con la cadencia real del dispositivo y que volver a vertical detiene el consumo.
+- [ ] **Android Chrome:** confirmar si el dispositivo informa `not-required` o solicita permiso, lecturas beta/gamma reales, dirección de consumo y audio por altavoz.
+- [ ] **Android Chrome:** confirmar safe areas, tamaño en orientación vertical, suspensión al cambiar de aplicación y vaciado en 4–7 segundos con hardware real.
+- [ ] En ambos: negar o bloquear el sensor desde los ajustes del navegador, esperar cinco segundos y verificar visualmente que todos los controles manuales siguen disponibles.
+
+La versión `1.0.0` indica que el código pasó la auditoría estática y simulada. No implica que las pruebas físicas anteriores ya se hayan realizado.

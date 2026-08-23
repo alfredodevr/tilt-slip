@@ -51,9 +51,9 @@
         </main>
 
         <footer class="chooser-footer">
-          <span>Phase three</span>
+          <span>Release 1.0</span>
           <span aria-hidden="true">•</span>
-          <span>Calibrated motion</span>
+          <span>Audited build</span>
         </footer>
       </section>
 
@@ -69,7 +69,7 @@
             <h2 id="currentDrinkName">Beer</h2>
           </div>
 
-          <button class="text-button text-button--refill" id="refillButton" type="button">Refill</button>
+          <button class="text-button text-button--refill" type="button" data-refill>Refill</button>
         </header>
 
         <main class="glass-area">
@@ -108,20 +108,30 @@
               <span>Enable Motion</span>
             </button>
 
+            <button class="action-button" type="button" data-refill>
+              <span class="action-button__icon" aria-hidden="true">↥</span>
+              <span>Refill</span>
+            </button>
+
+            <button class="action-button sound-button" id="soundButton" type="button" aria-label="Mute sound" aria-pressed="false">
+              <span class="action-button__icon" id="soundIcon" aria-hidden="true">♪</span>
+              <span id="soundButtonLabel">Mute</span>
+            </button>
+
             <button class="control-toggle" id="controlsButton" type="button" aria-expanded="false" aria-controls="diagnosticPanel">
               <span class="control-toggle__bars" aria-hidden="true">
                 <i></i><i></i><i></i>
               </span>
-              <span>Controls &amp; diagnostics</span>
+              <span>Diagnostics</span>
             </button>
           </div>
 
           <div class="calibration-card" id="calibrationCard" hidden>
             <p id="calibrationPrompt">Hold your phone upright and tap Calibrate</p>
-            <button class="calibrate-button" id="calibrateButton" type="button">Calibrate</button>
+            <button class="calibrate-button" id="calibrateButton" type="button" aria-describedby="calibrationPrompt">Calibrate</button>
           </div>
 
-          <p class="motion-message" id="motionMessage" data-tone="neutral">
+          <p class="motion-message" id="motionMessage" role="status" aria-live="polite" aria-atomic="true" data-tone="neutral">
             Motion is off. Manual controls remain available.
           </p>
         </footer>
@@ -132,7 +142,7 @@
               <span class="diagnostic-panel__kicker">Diagnostic mode</span>
               <strong>Controls &amp; sensor</strong>
             </div>
-            <span class="version-label">v0.3.0</span>
+            <span class="version-label">v1.0.0</span>
           </div>
 
           <div class="diagnostic-section">
