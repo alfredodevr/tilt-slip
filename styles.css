@@ -84,6 +84,7 @@ input:focus-visible {
   background-image: linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px);
   background-size: 100% 7px;
   content: "";
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent 80%);
   mask-image: linear-gradient(to bottom, black, transparent 80%);
   pointer-events: none;
 }
@@ -286,7 +287,9 @@ input:focus-visible {
 }
 
 .text-button,
-.control-toggle {
+.control-toggle,
+.motion-button,
+.copy-button {
   border: 0;
   background: none;
   cursor: pointer;
@@ -584,22 +587,69 @@ input:focus-visible {
   position: relative;
   z-index: 20;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 7px;
 }
 
+.drink-actions__buttons {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 8px;
+  width: min(100%, 440px);
+}
+
+.motion-button,
 .control-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 43px;
-  padding: 0 17px;
-  border: 1px solid var(--line);
+  gap: 9px;
+  width: 100%;
+  min-height: 45px;
+  padding: 0 12px;
   border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.motion-button {
+  border: 1px solid rgba(var(--accent-rgb), 0.72);
+  color: #15130e;
+  background: var(--accent);
+  box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.17);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.motion-button:hover {
+  box-shadow: 0 10px 30px rgba(var(--accent-rgb), 0.28);
+  transform: translateY(-1px);
+}
+
+.motion-button:active {
+  transform: scale(0.98);
+}
+
+.motion-button[aria-pressed="true"] {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.18);
+}
+
+.motion-button__pulse {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(19, 19, 15, 0.11);
+}
+
+.control-toggle {
+  border: 1px solid var(--line);
   color: #c5c8cf;
   background: rgba(255, 255, 255, 0.045);
-  font-size: 0.76rem;
-  font-weight: 650;
 }
 
 .control-toggle:hover,
@@ -627,6 +677,28 @@ input:focus-visible {
 .control-toggle__bars i:nth-child(2) { height: 12px; }
 .control-toggle__bars i:nth-child(3) { height: 9px; }
 
+.motion-message {
+  min-height: 16px;
+  max-width: 470px;
+  margin: 0;
+  color: #818690;
+  font-size: 0.63rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.motion-message[data-tone="success"] {
+  color: #a8d5a3;
+}
+
+.motion-message[data-tone="warning"] {
+  color: #e4c487;
+}
+
+.motion-message[data-tone="error"] {
+  color: #efa08d;
+}
+
 .diagnostic-panel {
   position: relative;
   z-index: 30;
@@ -634,14 +706,20 @@ input:focus-visible {
   gap: 11px;
   width: 100%;
   max-width: 520px;
+  max-height: min(56dvh, 590px);
   margin: 4px auto 0;
   padding: 14px 15px 15px;
+  overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 20px;
   background: var(--panel);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(var(--accent-rgb), 0.45) transparent;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .diagnostic-panel__header,
@@ -666,6 +744,113 @@ input:focus-visible {
   font-weight: 800;
   letter-spacing: 0.13em;
   text-transform: uppercase;
+}
+
+.diagnostic-section {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnostic-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagnostic-section__header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.diagnostic-section__header strong {
+  font-size: 0.72rem;
+}
+
+.diagnostic-section__header span {
+  color: #737984;
+  font-size: 0.56rem;
+}
+
+.diagnostic-divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.copy-button {
+  flex: 0 0 auto;
+  min-height: 31px;
+  padding: 0 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.08);
+  font-size: 0.59rem;
+  font-weight: 700;
+}
+
+.copy-button:hover {
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.diagnostic-grid > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.diagnostic-grid > .diagnostic-grid__wide {
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.diagnostic-grid dt {
+  color: #777d88;
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.diagnostic-grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #e5e2da;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostic-grid dd[data-status="granted"],
+.diagnostic-grid dd[data-status="not-required"] {
+  color: #a8d5a3;
+}
+
+.diagnostic-grid dd[data-status="denied"],
+.diagnostic-grid dd[data-status="error"] {
+  color: #efa08d;
+}
+
+.diagnostic-note {
+  margin: 0;
+  color: #717782;
+  font-size: 0.57rem;
+  line-height: 1.45;
 }
 
 .version-label {
@@ -755,7 +940,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .drink-screen.controls-open .glass-wrap {
-  height: min(39dvh, 430px);
+  height: min(34dvh, 390px);
 }
 
 @media (min-width: 620px) {
@@ -782,7 +967,8 @@ input[type="range"]::-moz-range-thumb {
     position: absolute;
     right: max(24px, env(safe-area-inset-right));
     bottom: max(24px, env(safe-area-inset-bottom));
-    width: 340px;
+    width: 380px;
+    max-height: calc(100dvh - 48px);
     margin: 0;
   }
 
@@ -806,6 +992,7 @@ input[type="range"]::-moz-range-thumb {
 
   .diagnostic-panel {
     gap: 7px;
+    max-height: 54dvh;
     padding-top: 10px;
     padding-bottom: 10px;
   }

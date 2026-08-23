@@ -51,9 +51,9 @@
         </main>
 
         <footer class="chooser-footer">
-          <span>Phase one</span>
+          <span>Phase two</span>
           <span aria-hidden="true">•</span>
-          <span>Manual simulation</span>
+          <span>Motion diagnostics</span>
         </footer>
       </section>
 
@@ -102,45 +102,108 @@
         </main>
 
         <footer class="drink-actions">
-          <button class="control-toggle" id="controlsButton" type="button" aria-expanded="false" aria-controls="diagnosticPanel">
-            <span class="control-toggle__bars" aria-hidden="true">
-              <i></i><i></i><i></i>
-            </span>
-            <span>Manual controls</span>
-          </button>
+          <div class="drink-actions__buttons">
+            <button class="motion-button" id="enableMotionButton" type="button" aria-describedby="motionMessage" aria-pressed="false">
+              <span class="motion-button__pulse" aria-hidden="true"></span>
+              <span>Enable Motion</span>
+            </button>
+
+            <button class="control-toggle" id="controlsButton" type="button" aria-expanded="false" aria-controls="diagnosticPanel">
+              <span class="control-toggle__bars" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+              <span>Controls &amp; diagnostics</span>
+            </button>
+          </div>
+
+          <p class="motion-message" id="motionMessage" data-tone="neutral">
+            Motion is off. Manual controls remain available.
+          </p>
         </footer>
 
-        <section class="diagnostic-panel" id="diagnosticPanel" aria-label="Manual simulation controls" hidden>
+        <section class="diagnostic-panel" id="diagnosticPanel" aria-label="Manual controls and orientation sensor diagnostics" hidden>
           <div class="diagnostic-panel__header">
             <div>
               <span class="diagnostic-panel__kicker">Diagnostic mode</span>
-              <strong>Liquid controls</strong>
+              <strong>Controls &amp; sensor</strong>
             </div>
-            <span class="version-label">v0.1.0</span>
+            <span class="version-label">v0.2.0</span>
           </div>
 
-          <div class="range-control">
-            <label for="fillControl">
-              <span>Fill level</span>
-              <output id="fillOutput" for="fillControl">82%</output>
-            </label>
-            <input id="fillControl" type="range" min="0" max="100" step="1" value="82">
+          <div class="diagnostic-section">
+            <div class="diagnostic-section__header">
+              <strong>Manual simulation</strong>
+              <span>Always available</span>
+            </div>
+
+            <div class="range-control">
+              <label for="fillControl">
+                <span>Fill level</span>
+                <output id="fillOutput" for="fillControl">82%</output>
+              </label>
+              <input id="fillControl" type="range" min="0" max="100" step="1" value="82">
+            </div>
+
+            <div class="range-control">
+              <label for="sideTiltControl">
+                <span>Side tilt</span>
+                <output id="sideTiltOutput" for="sideTiltControl">0°</output>
+              </label>
+              <input id="sideTiltControl" type="range" min="-18" max="18" step="1" value="0">
+            </div>
+
+            <div class="range-control">
+              <label for="mouthTiltControl">
+                <span>Tilt to mouth</span>
+                <output id="mouthTiltOutput" for="mouthTiltControl">0°</output>
+              </label>
+              <input id="mouthTiltControl" type="range" min="0" max="60" step="1" value="0">
+            </div>
           </div>
 
-          <div class="range-control">
-            <label for="sideTiltControl">
-              <span>Side tilt</span>
-              <output id="sideTiltOutput" for="sideTiltControl">0°</output>
-            </label>
-            <input id="sideTiltControl" type="range" min="-18" max="18" step="1" value="0">
-          </div>
+          <div class="diagnostic-divider" aria-hidden="true"></div>
 
-          <div class="range-control">
-            <label for="mouthTiltControl">
-              <span>Tilt to mouth</span>
-              <output id="mouthTiltOutput" for="mouthTiltControl">0°</output>
-            </label>
-            <input id="mouthTiltControl" type="range" min="0" max="60" step="1" value="0">
+          <div class="diagnostic-section diagnostic-section--motion">
+            <div class="diagnostic-section__header">
+              <div>
+                <strong>Orientation sensor</strong>
+                <span>Read-only in this phase</span>
+              </div>
+              <button class="copy-button" id="copyDiagnosticsButton" type="button">Copy diagnostics</button>
+            </div>
+
+            <dl class="diagnostic-grid">
+              <div>
+                <dt>Protocol</dt>
+                <dd id="protocolValue">Checking…</dd>
+              </div>
+              <div>
+                <dt>API</dt>
+                <dd id="apiValue">Checking…</dd>
+              </div>
+              <div>
+                <dt>Permission</dt>
+                <dd id="permissionValue">not-requested</dd>
+              </div>
+              <div>
+                <dt>Beta</dt>
+                <dd id="betaValue">—</dd>
+              </div>
+              <div>
+                <dt>Gamma</dt>
+                <dd id="gammaValue">—</dd>
+              </div>
+              <div>
+                <dt>Last event</dt>
+                <dd id="lastEventValue">—</dd>
+              </div>
+              <div class="diagnostic-grid__wide">
+                <dt>Events received</dt>
+                <dd id="eventCountValue">0</dd>
+              </div>
+            </dl>
+
+            <p class="diagnostic-note">Sensor readings are diagnostic only. They do not change the drink level in version 0.2.0.</p>
           </div>
         </section>
 

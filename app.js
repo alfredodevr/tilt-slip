@@ -1,6 +1,7 @@
 "use strict";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
+const SENSOR_TIMEOUT_MS = 5000;
 
 const DRINKS = Object.freeze({
   beer: Object.freeze({
@@ -53,6 +54,18 @@ const state = {
   diagnosticsOpen: false
 };
 
+const motionState = {
+  protocol: "Not HTTPS",
+  apiAvailable: false,
+  permission: "not-requested",
+  beta: null,
+  gamma: null,
+  lastEvent: null,
+  eventCount: 0,
+  listenerRegistered: false,
+  timeoutId: null
+};
+
 const elements = {
   app: document.querySelector("#app"),
   chooserScreen: document.querySelector("#chooserScreen"),
@@ -73,7 +86,17 @@ const elements = {
   backButton: document.querySelector("#backButton"),
   refillButton: document.querySelector("#refillButton"),
   controlsButton: document.querySelector("#controlsButton"),
+  enableMotionButton: document.querySelector("#enableMotionButton"),
+  motionMessage: document.querySelector("#motionMessage"),
   diagnosticPanel: document.querySelector("#diagnosticPanel"),
+  copyDiagnosticsButton: document.querySelector("#copyDiagnosticsButton"),
+  protocolValue: document.querySelector("#protocolValue"),
+  apiValue: document.querySelector("#apiValue"),
+  permissionValue: document.querySelector("#permissionValue"),
+  betaValue: document.querySelector("#betaValue"),
+  gammaValue: document.querySelector("#gammaValue"),
+  lastEventValue: document.querySelector("#lastEventValue"),
+  eventCountValue: document.querySelector("#eventCountValue"),
   versionLabel: document.querySelector(".version-label"),
   liveStatus: document.querySelector("#liveStatus")
 };
@@ -197,6 +220,7 @@ function selectDrink(drinkKey) {
   createBubbles(drink.bubbleCount, drinkKey === "beer" ? 100 : 300);
   createFoamCells(drink.foam.cells, drinkKey === "beer" ? 500 : 700);
   renderLiquid();
+  renderMotionDiagnostics();
   setDiagnostics(debugRequested);
 
   elements.chooserScreen.hidden = true;
@@ -224,6 +248,131 @@ function readNumber(input) {
   return Number.parseFloat(input.value);
 }
 
+function formatAngle(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)}°` : "—";
+}
+
+function formatEventTime(date) {
+  if (!(date instanceof Date)) return "—";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function setMotionMessage(message, tone = "neutral") {
+  elements.motionMessage.textContent = message;
+  elements.motionMessage.dataset.tone = tone;
+}
+
+function renderMotionDiagnostics() {
+  elements.protocolValue.textContent = motionState.protocol;
+  elements.apiValue.textContent = motionState.apiAvailable ? "available" : "unavailable";
+  elements.permissionValue.textContent = motionState.permission;
+  elements.permissionValue.dataset.status = motionState.permission;
+  elements.betaValue.textContent = formatAngle(motionState.beta);
+  elements.gammaValue.textContent = formatAngle(motionState.gamma);
+  elements.lastEventValue.textContent = formatEventTime(motionState.lastEvent);
+  elements.eventCountValue.textContent = String(motionState.eventCount);
+  elements.enableMotionButton.setAttribute("aria-pressed", String(motionState.listenerRegistered));
+}
+
+function handleDeviceOrientation(event) {
+  if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
+
+  motionState.beta = event.beta;
+  motionState.gamma = event.gamma;
+  motionState.lastEvent = new Date();
+  motionState.eventCount += 1;
+
+  if (motionState.timeoutId !== null) {
+    window.clearTimeout(motionState.timeoutId);
+    motionState.timeoutId = null;
+  }
+
+  if (motionState.eventCount === 1) {
+    setMotionMessage("Motion data received. Sensor values are diagnostic only.", "success");
+  }
+
+  renderMotionDiagnostics();
+}
+
+function startSensorTimeout() {
+  if (motionState.timeoutId !== null) {
+    window.clearTimeout(motionState.timeoutId);
+  }
+
+  const startingEventCount = motionState.eventCount;
+  motionState.timeoutId = window.setTimeout(() => {
+    motionState.timeoutId = null;
+
+    if (motionState.eventCount === startingEventCount) {
+      setMotionMessage(
+        "No orientation data arrived within 5 seconds. Keep using manual controls and verify HTTPS and device sensor settings.",
+        "warning"
+      );
+    }
+  }, SENSOR_TIMEOUT_MS);
+}
+
+function registerOrientationListener() {
+  if (motionState.listenerRegistered) return;
+
+  window.addEventListener("deviceorientation", handleDeviceOrientation, { passive: true });
+  motionState.listenerRegistered = true;
+  setMotionMessage("Motion enabled. Waiting up to 5 seconds for orientation data…", "neutral");
+  startSensorTimeout();
+}
+
+function diagnosticsText() {
+  return [
+    "TiltSip motion diagnostics",
+    `Version: ${VERSION}`,
+    `Protocol: ${motionState.protocol}`,
+    `API: ${motionState.apiAvailable ? "available" : "unavailable"}`,
+    `Permission: ${motionState.permission}`,
+    `Beta: ${formatAngle(motionState.beta)}`,
+    `Gamma: ${formatAngle(motionState.gamma)}`,
+    `Last event: ${formatEventTime(motionState.lastEvent)}`,
+    `Events received: ${motionState.eventCount}`
+  ].join("\n");
+}
+
+function fallbackCopy(text) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  const copied = document.execCommand("copy");
+  textArea.remove();
+
+  if (!copied) throw new Error("Copy command was rejected.");
+}
+
+async function copyDiagnostics() {
+  try {
+    const text = diagnosticsText();
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopy(text);
+    }
+
+    elements.copyDiagnosticsButton.textContent = "Copied";
+    elements.liveStatus.textContent = "Motion diagnostics copied.";
+  } catch (error) {
+    elements.copyDiagnosticsButton.textContent = "Copy failed";
+    elements.liveStatus.textContent = "Motion diagnostics could not be copied automatically.";
+    setMotionMessage("Copy failed. You can still read every diagnostic value in this panel.", "warning");
+  }
+}
+
 function bindEvents() {
   elements.drinkCards.forEach((card) => {
     card.addEventListener("click", () => selectDrink(card.dataset.drink));
@@ -232,6 +381,9 @@ function bindEvents() {
   elements.backButton.addEventListener("click", returnToChooser);
   elements.refillButton.addEventListener("click", refillGlass);
   elements.controlsButton.addEventListener("click", () => setDiagnostics(!state.diagnosticsOpen));
+  elements.copyDiagnosticsButton.addEventListener("click", () => {
+    void copyDiagnostics();
+  });
 
   elements.fillControl.addEventListener("input", (event) => {
     state.fill = readNumber(event.currentTarget);
@@ -247,10 +399,80 @@ function bindEvents() {
     state.mouthTilt = readNumber(event.currentTarget);
     renderLiquid();
   });
+
+  // Permission remains inside this click handler to preserve transient user activation.
+  elements.enableMotionButton.addEventListener("click", async () => {
+    try {
+      const OrientationEvent = window.DeviceOrientationEvent;
+
+      if (typeof OrientationEvent === "undefined") {
+        motionState.apiAvailable = false;
+        motionState.permission = "not-required";
+        setMotionMessage(
+          "Orientation is unavailable on this device or browser. Manual controls remain fully functional.",
+          "warning"
+        );
+        renderMotionDiagnostics();
+        setDiagnostics(true);
+        return;
+      }
+
+      motionState.apiAvailable = true;
+
+      if (motionState.listenerRegistered) {
+        setMotionMessage(
+          motionState.eventCount > 0
+            ? "Motion is already enabled. Sensor values are diagnostic only."
+            : "Motion is enabled but no valid data has arrived yet. Manual controls remain available.",
+          motionState.eventCount > 0 ? "success" : "warning"
+        );
+        renderMotionDiagnostics();
+        setDiagnostics(true);
+        return;
+      }
+
+      if (typeof OrientationEvent.requestPermission === "function") {
+        const permissionResult = await OrientationEvent.requestPermission();
+
+        if (permissionResult !== "granted") {
+          motionState.permission = "denied";
+          setMotionMessage(
+            "Motion permission was denied. You can continue with every manual control or change the site permission and try again.",
+            "warning"
+          );
+          renderMotionDiagnostics();
+          setDiagnostics(true);
+          return;
+        }
+
+        motionState.permission = "granted";
+        registerOrientationListener();
+        renderMotionDiagnostics();
+        setDiagnostics(true);
+        return;
+      }
+
+      motionState.permission = "not-required";
+      registerOrientationListener();
+      renderMotionDiagnostics();
+      setDiagnostics(true);
+    } catch (error) {
+      motionState.permission = "error";
+      setMotionMessage(
+        "Motion could not be enabled. Manual controls remain fully functional; verify HTTPS and the site sensor permission.",
+        "error"
+      );
+      renderMotionDiagnostics();
+      setDiagnostics(true);
+    }
+  });
 }
 
 function initialize() {
+  motionState.protocol = window.location.protocol === "https:" ? "HTTPS" : "Not HTTPS";
+  motionState.apiAvailable = typeof window.DeviceOrientationEvent !== "undefined";
   elements.versionLabel.textContent = `v${VERSION}`;
+  renderMotionDiagnostics();
   bindEvents();
 }
 
