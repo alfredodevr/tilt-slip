@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#090b10">
+    <meta name="theme-color" content="#080a0e">
     <meta name="description" content="TiltSip is an original mobile drink-simulation experiment.">
     <title>TiltSip</title>
     <link rel="stylesheet" href="./styles.css">
-    <script src="./app.js" defer></script>
+    <script type="module" src="./app.js"></script>
   </head>
 
   <body>
@@ -21,7 +21,7 @@
         <main class="chooser-content">
           <p class="eyebrow">Choose your pour</p>
           <h1 id="chooserTitle">What’s in your glass?</h1>
-          <p class="chooser-intro">Two distinct pours. One convincing little illusion.</p>
+          <p class="chooser-intro">Tilt sideways. The liquid moves, reaches the rim and pours.</p>
 
           <div class="drink-options" aria-label="Available drinks">
             <button class="drink-card drink-card--beer" type="button" data-drink="beer">
@@ -31,7 +31,7 @@
               </span>
               <span class="drink-card__copy">
                 <strong>Beer</strong>
-                <small>Amber · bright · lively</small>
+                <small>Amber · creamy · lively</small>
               </span>
               <span class="drink-card__arrow" aria-hidden="true">→</span>
             </button>
@@ -43,7 +43,7 @@
               </span>
               <span class="drink-card__copy">
                 <strong>Cola</strong>
-                <small>Dark · red glow · crisp</small>
+                <small>Dark · red edge · crisp</small>
               </span>
               <span class="drink-card__arrow" aria-hidden="true">→</span>
             </button>
@@ -51,9 +51,9 @@
         </main>
 
         <footer class="chooser-footer">
-          <span>Release 1.0</span>
+          <span>Physics build</span>
           <span aria-hidden="true">•</span>
-          <span>Audited build</span>
+          <span>Side tilt only</span>
         </footer>
       </section>
 
@@ -73,31 +73,74 @@
         </header>
 
         <main class="glass-area">
-          <div class="ambient-orbit" aria-hidden="true"></div>
+          <div class="glass-wrap" id="glassWrap" role="img" aria-label="A glass of beer, 82 percent full">
+            <svg class="glass-svg" id="glassSvg" viewBox="0 0 380 620" aria-hidden="true" focusable="false">
+              <defs>
+                <linearGradient id="glassBodyGradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="rgba(210, 226, 234, 0.18)"></stop>
+                  <stop offset="0.12" stop-color="rgba(255, 255, 255, 0.06)"></stop>
+                  <stop offset="0.48" stop-color="rgba(182, 202, 212, 0.025)"></stop>
+                  <stop offset="0.83" stop-color="rgba(255, 255, 255, 0.07)"></stop>
+                  <stop offset="1" stop-color="rgba(210, 228, 237, 0.2)"></stop>
+                </linearGradient>
+                <linearGradient id="glassWallGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="rgba(255, 255, 255, 0.11)"></stop>
+                  <stop offset="0.55" stop-color="rgba(210, 228, 237, 0.025)"></stop>
+                  <stop offset="1" stop-color="rgba(184, 207, 220, 0.16)"></stop>
+                </linearGradient>
+                <linearGradient id="liquidGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop class="liquid-stop liquid-stop--edge" offset="0"></stop>
+                  <stop class="liquid-stop liquid-stop--top" offset="0.18"></stop>
+                  <stop class="liquid-stop liquid-stop--middle" offset="0.56"></stop>
+                  <stop class="liquid-stop liquid-stop--bottom" offset="1"></stop>
+                </linearGradient>
+                <radialGradient id="liquidLightGradient" cx="38%" cy="28%" r="72%">
+                  <stop class="liquid-light-stop" offset="0"></stop>
+                  <stop offset="0.52" stop-color="rgba(255, 255, 255, 0.025)"></stop>
+                  <stop offset="1" stop-color="rgba(0, 0, 0, 0.2)"></stop>
+                </radialGradient>
+                <linearGradient id="foamGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop class="foam-stop foam-stop--top" offset="0"></stop>
+                  <stop class="foam-stop foam-stop--bottom" offset="1"></stop>
+                </linearGradient>
+                <clipPath id="cavityClip" clipPathUnits="userSpaceOnUse">
+                  <path id="cavityClipPath"></path>
+                </clipPath>
+                <clipPath id="liquidClip" clipPathUnits="userSpaceOnUse">
+                  <path id="liquidClipPath"></path>
+                </clipPath>
+              </defs>
 
-          <div class="glass-wrap" id="glassWrap" role="img" aria-label="A glass filled with beer">
-            <div class="glass">
-              <div class="glass__interior">
-                <div class="liquid" id="liquid" aria-hidden="true">
-                  <div class="liquid__body-glow"></div>
-                  <div class="bubbles" id="bubbles"></div>
-                  <div class="liquid__surface">
-                    <div class="foam" id="foam"></div>
-                  </div>
-                </div>
+              <g class="glass-handle" id="glassHandleGroup">
+                <path class="glass-handle__outer" id="glassHandleOuter"></path>
+                <path class="glass-handle__inner" id="glassHandleInner"></path>
+              </g>
 
-                <div class="glass__shine glass__shine--left" aria-hidden="true"></div>
-                <div class="glass__shine glass__shine--right" aria-hidden="true"></div>
-              </div>
+              <path class="glass-body-back" id="glassOuterPath"></path>
 
-              <div class="glass__rim" aria-hidden="true"></div>
-              <div class="glass__base" aria-hidden="true"></div>
-            </div>
+              <g class="cavity-content" clip-path="url(#cavityClip)">
+                <path class="liquid-shape" id="liquidShape"></path>
+                <path class="liquid-light" id="liquidLight"></path>
+                <g class="bubbles" id="bubbles" clip-path="url(#liquidClip)"></g>
+                <path class="foam-shape" id="foamShape"></path>
+                <g class="foam-cells" id="foamCells"></g>
+                <path class="meniscus" id="meniscusPath"></path>
+              </g>
+
+              <path class="glass-wall-overlay" id="glassWallOverlay"></path>
+              <path class="cavity-outline" id="cavityOutline"></path>
+              <path class="glass-reflection glass-reflection--primary" id="glassReflectionPrimary"></path>
+              <path class="glass-reflection glass-reflection--secondary" id="glassReflectionSecondary"></path>
+              <path class="glass-reflection glass-reflection--edge" id="glassReflectionEdge"></path>
+              <ellipse class="glass-rim glass-rim--outer" id="glassRimOuter"></ellipse>
+              <ellipse class="glass-rim glass-rim--inner" id="glassRimInner"></ellipse>
+              <ellipse class="glass-base" id="glassBase"></ellipse>
+            </svg>
           </div>
 
           <p class="level-status" aria-hidden="true">
             <span id="fillReadout">82%</span>
-            <span id="levelLabel">full</span>
+            <span id="levelLabel">remaining</span>
           </p>
         </main>
 
@@ -119,9 +162,7 @@
             </button>
 
             <button class="control-toggle" id="controlsButton" type="button" aria-expanded="false" aria-controls="diagnosticPanel">
-              <span class="control-toggle__bars" aria-hidden="true">
-                <i></i><i></i><i></i>
-              </span>
+              <span class="control-toggle__bars" aria-hidden="true"><i></i><i></i><i></i></span>
               <span>Diagnostics</span>
             </button>
           </div>
@@ -136,13 +177,13 @@
           </p>
         </footer>
 
-        <section class="diagnostic-panel" id="diagnosticPanel" aria-label="Manual controls and orientation sensor diagnostics" hidden>
+        <section class="diagnostic-panel" id="diagnosticPanel" aria-label="Manual controls and side-tilt diagnostics" hidden>
           <div class="diagnostic-panel__header">
             <div>
               <span class="diagnostic-panel__kicker">Diagnostic mode</span>
-              <strong>Controls &amp; sensor</strong>
+              <strong>Controls &amp; physics</strong>
             </div>
-            <span class="version-label">v1.0.0</span>
+            <span class="version-label">v2.0.0</span>
           </div>
 
           <div class="diagnostic-section">
@@ -164,15 +205,7 @@
                 <span>Side tilt</span>
                 <output id="sideTiltOutput" for="sideTiltControl">0°</output>
               </label>
-              <input id="sideTiltControl" type="range" min="-18" max="18" step="1" value="0">
-            </div>
-
-            <div class="range-control">
-              <label for="mouthTiltControl">
-                <span>Tilt to mouth</span>
-                <output id="mouthTiltOutput" for="mouthTiltControl">0°</output>
-              </label>
-              <input id="mouthTiltControl" type="range" min="0" max="60" step="1" value="0">
+              <input id="sideTiltControl" type="range" min="-90" max="90" step="1" value="0">
             </div>
           </div>
 
@@ -181,77 +214,35 @@
           <div class="diagnostic-section diagnostic-section--motion">
             <div class="diagnostic-section__header">
               <div>
-                <strong>Orientation sensor</strong>
-                <span>Calibrated motion simulation</span>
+                <strong>Sensor &amp; spill model</strong>
+                <span>Area-conserving side tilt</span>
               </div>
               <button class="copy-button" id="copyDiagnosticsButton" type="button">Copy diagnostics</button>
             </div>
 
             <dl class="diagnostic-grid">
-              <div>
-                <dt>Protocol</dt>
-                <dd id="protocolValue">Checking…</dd>
-              </div>
-              <div>
-                <dt>API</dt>
-                <dd id="apiValue">Checking…</dd>
-              </div>
-              <div>
-                <dt>Permission</dt>
-                <dd id="permissionValue">not-requested</dd>
-              </div>
-              <div>
-                <dt>Beta</dt>
-                <dd id="betaValue">—</dd>
-              </div>
-              <div>
-                <dt>Gamma</dt>
-                <dd id="gammaValue">—</dd>
-              </div>
-              <div>
-                <dt>Last event</dt>
-                <dd id="lastEventValue">—</dd>
-              </div>
-              <div class="diagnostic-grid__wide">
-                <dt>Events received</dt>
-                <dd id="eventCountValue">0</dd>
-              </div>
-              <div>
-                <dt>Beta base</dt>
-                <dd id="betaBaseValue">—</dd>
-              </div>
-              <div>
-                <dt>Gamma base</dt>
-                <dd id="gammaBaseValue">—</dd>
-              </div>
-              <div>
-                <dt>Tilt to mouth</dt>
-                <dd id="calculatedMouthValue">0.00°</dd>
-              </div>
-              <div>
-                <dt>Side tilt</dt>
-                <dd id="calculatedSideValue">0.00°</dd>
-              </div>
-              <div>
-                <dt>Current level</dt>
-                <dd id="currentLevelValue">0.82</dd>
-              </div>
-              <div>
-                <dt>State</dt>
-                <dd id="simulationStateValue">ready</dd>
-              </div>
+              <div><dt>Protocol</dt><dd id="protocolValue">Checking…</dd></div>
+              <div><dt>API</dt><dd id="apiValue">Checking…</dd></div>
+              <div><dt>Permission</dt><dd id="permissionValue">not-requested</dd></div>
+              <div><dt>Beta raw</dt><dd id="betaValue">—</dd></div>
+              <div><dt>Gamma raw</dt><dd id="gammaValue">—</dd></div>
+              <div><dt>Gamma base</dt><dd id="gammaBaseValue">—</dd></div>
+              <div><dt>Last event</dt><dd id="lastEventValue">—</dd></div>
+              <div><dt>Events</dt><dd id="eventCountValue">0</dd></div>
+              <div><dt>Side tilt raw</dt><dd id="sideTiltRawValue">0.00°</dd></div>
+              <div><dt>Side tilt filtered</dt><dd id="sideTiltFilteredValue">0.00°</dd></div>
+              <div><dt>Side tilt clamped</dt><dd id="sideTiltClampedValue">0.00°</dd></div>
+              <div><dt>Current fill</dt><dd id="currentFillValue">0.820</dd></div>
+              <div><dt>Capacity</dt><dd id="capacityValue">1.000</dd></div>
+              <div><dt>Overflow</dt><dd id="overflowValue">0.000</dd></div>
+              <div><dt>Flow rate</dt><dd id="flowRateValue">0.000/s</dd></div>
+              <div><dt>Lower lip</dt><dd id="lowerLipValue">level</dd></div>
+              <div><dt>Physics state</dt><dd id="physicsStateValue">ready</dd></div>
+              <div><dt>Audio state</dt><dd id="audioStateValue">not-started</dd></div>
+              <div class="diagnostic-grid__wide"><dt>App version</dt><dd id="appVersionValue">2.0.0</dd></div>
             </dl>
 
-            <label class="switch-control" for="invertDirectionControl">
-              <span>
-                <strong>Invert drinking direction</strong>
-                <small>Use this if tilting toward your mouth produces the opposite value.</small>
-              </span>
-              <input id="invertDirectionControl" type="checkbox">
-              <i aria-hidden="true"></i>
-            </label>
-
-            <p class="diagnostic-note">After calibration, beta controls drinking and gamma controls the liquid surface. Manual controls remain available.</p>
+            <p class="diagnostic-note">Side tilt alone controls the free surface, rim contact and progressive spill. The raw beta value is diagnostic only.</p>
           </div>
         </section>
 

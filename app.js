@@ -1,132 +1,81 @@
 "use strict";
 
-const VERSION = "1.0.0";
+import { DRINKS, GLASS_GEOMETRIES } from "./config.js";
+import {
+  capacityAtAngle,
+  clamp,
+  foamBandPolygon,
+  gravityFromAngle,
+  polygonToPath,
+  stepSpill,
+  surfaceSegment,
+  thresholdForAreaFraction
+} from "./physics.js";
+
+const APP_VERSION = "2.0.0";
 const SENSOR_TIMEOUT_MS = 5000;
 const CALIBRATION_DURATION_MS = 550;
 const MIN_CALIBRATION_SAMPLES = 4;
-const DRINK_THRESHOLD_DEGREES = 18;
-const MAX_MOUTH_DEGREES = 70;
-const MAX_SIDE_DEGREES = 55;
-const MIN_DRINK_RATE = 0.06;
-const MAX_DRINK_RATE = 0.2;
-const REFILL_RATE = 1.8;
-const SMOOTHING_RESPONSE = 14;
+const MAX_SIDE_DEGREES = 90;
+const SMOOTHING_RESPONSE = 16;
+const REFILL_RATE = 1.35;
+const DIAGNOSTIC_INTERVAL_MS = 100;
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
-const DRINKS = Object.freeze({
-  beer: Object.freeze({
-    name: "Beer",
-    initialFill: 82,
-    accent: "#ffc54a",
-    accentRgb: "255, 197, 74",
-    colors: Object.freeze({
-      top: "#f8c74f",
-      middle: "#dc8b13",
-      bottom: "#8c4504",
-      glow: "rgba(255, 214, 104, 0.68)",
-      reflection: "rgba(255, 238, 174, 0.24)",
-      opacity: 0.9,
-      bubble: "rgba(255, 248, 212, 0.72)"
-    }),
-    foam: Object.freeze({
-      color: "#fff9e8",
-      shadow: "#dbc99f",
-      height: 42,
-      cells: 15,
-      shrink: 0.14
-    }),
-    bubbles: Object.freeze({
-      count: 18,
-      minimumSize: 1.4,
-      maximumSize: 4.2,
-      minimumSpeed: 4.2,
-      maximumSpeed: 7
-    })
-  }),
-  cola: Object.freeze({
-    name: "Cola",
-    initialFill: 78,
-    accent: "#ef7658",
-    accentRgb: "239, 118, 88",
-    colors: Object.freeze({
-      top: "#7c2d20",
-      middle: "#35130e",
-      bottom: "#090605",
-      glow: "rgba(208, 72, 42, 0.55)",
-      reflection: "rgba(239, 92, 60, 0.2)",
-      opacity: 0.96,
-      bubble: "rgba(237, 176, 128, 0.68)"
-    }),
-    foam: Object.freeze({
-      color: "#d9b790",
-      shadow: "#9d7653",
-      height: 27,
-      cells: 10,
-      shrink: 0.1
-    }),
-    bubbles: Object.freeze({
-      count: 22,
-      minimumSize: 1.8,
-      maximumSize: 4.8,
-      minimumSpeed: 1.8,
-      maximumSpeed: 3.5
-    })
-  })
-});
-
-const state = {
+const simulationState = {
   drinkKey: null,
-  level: 0,
-  sideTilt: 0,
-  mouthTilt: 0,
-  diagnosticsOpen: false,
-  effectGeneration: 0
-};
-
-const motionState = {
-  protocol: "Not HTTPS",
-  apiAvailable: false,
-  permission: "not-requested",
-  beta: null,
-  gamma: null,
-  lastEvent: null,
-  eventCount: 0,
-  listenerRegistered: false,
-  timeoutId: null,
-  betaBase: null,
-  gammaBase: null,
-  calibrated: false,
-  calibrationSamples: [],
-  calibrationTimerId: null,
-  calculatedMouth: 0,
-  calculatedSide: 0,
-  smoothedMouth: 0,
-  smoothedSide: 0,
-  invertDirection: false,
-  inputMode: "manual",
-  simulationStatus: "ready",
+  fillLevel: 0,
+  capacityFraction: 1,
+  overflowAmount: 0,
+  flowRate: 0,
+  lowerLip: "level",
+  physicsStatus: "ready",
   isRefilling: false,
+  diagnosticsOpen: false,
+  effectGeneration: 0,
   animationFrameId: null,
   lastFrameTime: null,
   lastDiagnosticsFrame: 0
 };
 
+const sensorState = {
+  protocol: "Not HTTPS",
+  apiAvailable: false,
+  permission: "not-requested",
+  beta: null,
+  gamma: null,
+  gammaBase: null,
+  rawSideTilt: 0,
+  filteredSideTilt: 0,
+  clampedSideTilt: 0,
+  lastEvent: null,
+  eventCount: 0,
+  listenerRegistered: false,
+  timeoutId: null,
+  calibrated: false,
+  calibrating: false,
+  calibrationSamples: [],
+  calibrationTimerId: null,
+  inputMode: "manual"
+};
+
 const audioState = {
   context: null,
   masterGain: null,
-  gasGain: null,
-  drinkingGain: null,
-  sources: [],
+  noiseBuffer: null,
+  activeSources: new Set(),
+  ambientTimerId: null,
+  nextSpillEventAt: 0,
+  eventSequence: 0,
   interacted: false,
-  enabled: false,
   muted: false,
-  unavailable: false,
-  masterTarget: null,
-  gasTarget: null,
-  drinkingTarget: null
+  unavailable: false
 };
 
 const renderCache = {
-  cssVariables: new Map()
+  cssVariables: new Map(),
+  geometryKey: "",
+  glassKey: ""
 };
 
 const elements = {
@@ -136,17 +85,33 @@ const elements = {
   drinkCards: document.querySelectorAll("[data-drink]"),
   currentDrinkName: document.querySelector("#currentDrinkName"),
   glassWrap: document.querySelector("#glassWrap"),
-  liquid: document.querySelector("#liquid"),
+  glassSvg: document.querySelector("#glassSvg"),
+  glassHandleGroup: document.querySelector("#glassHandleGroup"),
+  glassHandleOuter: document.querySelector("#glassHandleOuter"),
+  glassHandleInner: document.querySelector("#glassHandleInner"),
+  glassOuterPath: document.querySelector("#glassOuterPath"),
+  glassWallOverlay: document.querySelector("#glassWallOverlay"),
+  cavityClipPath: document.querySelector("#cavityClipPath"),
+  cavityOutline: document.querySelector("#cavityOutline"),
+  liquidShape: document.querySelector("#liquidShape"),
+  liquidLight: document.querySelector("#liquidLight"),
+  liquidClipPath: document.querySelector("#liquidClipPath"),
+  foamShape: document.querySelector("#foamShape"),
+  foamCells: document.querySelector("#foamCells"),
+  meniscusPath: document.querySelector("#meniscusPath"),
   bubbles: document.querySelector("#bubbles"),
-  foam: document.querySelector("#foam"),
+  glassReflectionPrimary: document.querySelector("#glassReflectionPrimary"),
+  glassReflectionSecondary: document.querySelector("#glassReflectionSecondary"),
+  glassReflectionEdge: document.querySelector("#glassReflectionEdge"),
+  glassRimOuter: document.querySelector("#glassRimOuter"),
+  glassRimInner: document.querySelector("#glassRimInner"),
+  glassBase: document.querySelector("#glassBase"),
   fillReadout: document.querySelector("#fillReadout"),
   levelLabel: document.querySelector("#levelLabel"),
   fillControl: document.querySelector("#fillControl"),
   fillOutput: document.querySelector("#fillOutput"),
   sideTiltControl: document.querySelector("#sideTiltControl"),
   sideTiltOutput: document.querySelector("#sideTiltOutput"),
-  mouthTiltControl: document.querySelector("#mouthTiltControl"),
-  mouthTiltOutput: document.querySelector("#mouthTiltOutput"),
   backButton: document.querySelector("#backButton"),
   refillButtons: document.querySelectorAll("[data-refill]"),
   controlsButton: document.querySelector("#controlsButton"),
@@ -165,15 +130,20 @@ const elements = {
   permissionValue: document.querySelector("#permissionValue"),
   betaValue: document.querySelector("#betaValue"),
   gammaValue: document.querySelector("#gammaValue"),
+  gammaBaseValue: document.querySelector("#gammaBaseValue"),
   lastEventValue: document.querySelector("#lastEventValue"),
   eventCountValue: document.querySelector("#eventCountValue"),
-  betaBaseValue: document.querySelector("#betaBaseValue"),
-  gammaBaseValue: document.querySelector("#gammaBaseValue"),
-  calculatedMouthValue: document.querySelector("#calculatedMouthValue"),
-  calculatedSideValue: document.querySelector("#calculatedSideValue"),
-  currentLevelValue: document.querySelector("#currentLevelValue"),
-  simulationStateValue: document.querySelector("#simulationStateValue"),
-  invertDirectionControl: document.querySelector("#invertDirectionControl"),
+  sideTiltRawValue: document.querySelector("#sideTiltRawValue"),
+  sideTiltFilteredValue: document.querySelector("#sideTiltFilteredValue"),
+  sideTiltClampedValue: document.querySelector("#sideTiltClampedValue"),
+  currentFillValue: document.querySelector("#currentFillValue"),
+  capacityValue: document.querySelector("#capacityValue"),
+  overflowValue: document.querySelector("#overflowValue"),
+  flowRateValue: document.querySelector("#flowRateValue"),
+  lowerLipValue: document.querySelector("#lowerLipValue"),
+  physicsStateValue: document.querySelector("#physicsStateValue"),
+  audioStateValue: document.querySelector("#audioStateValue"),
+  appVersionValue: document.querySelector("#appVersionValue"),
   versionLabel: document.querySelector(".version-label"),
   liveStatus: document.querySelector("#liveStatus")
 };
@@ -181,10 +151,6 @@ const elements = {
 const debugRequested = new URLSearchParams(window.location.search).get("debug") === "1";
 const prefersReducedMotion = typeof window.matchMedia === "function"
   && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function clamp(value, minimum, maximum) {
-  return Math.min(Math.max(value, minimum), maximum);
-}
 
 function normalizeAngleDifference(value, reference) {
   let difference = (value - reference) % 360;
@@ -203,7 +169,6 @@ function circularMeanDegrees(values) {
     },
     { sine: 0, cosine: 0 }
   );
-
   return Math.atan2(totals.sine, totals.cosine) * 180 / Math.PI;
 }
 
@@ -212,10 +177,10 @@ function seededFraction(seed) {
   return value - Math.floor(value);
 }
 
-function setCssVariable(name, value) {
-  if (renderCache.cssVariables.get(name) === value) return;
-  renderCache.cssVariables.set(name, value);
-  elements.app.style.setProperty(name, value);
+function currentFrameTime() {
+  return window.performance && typeof window.performance.now === "function"
+    ? window.performance.now()
+    : Date.now();
 }
 
 function setTextContent(element, value) {
@@ -230,458 +195,14 @@ function setAttributeValue(element, name, value) {
   if (element.getAttribute(name) !== value) element.setAttribute(name, value);
 }
 
-function currentFrameTime() {
-  return window.performance && typeof window.performance.now === "function"
-    ? window.performance.now()
-    : Date.now();
+function setCssVariable(name, value) {
+  if (renderCache.cssVariables.get(name) === value) return;
+  renderCache.cssVariables.set(name, value);
+  elements.app.style.setProperty(name, value);
 }
 
-function updateSoundButton() {
-  if (audioState.unavailable) {
-    elements.soundButton.disabled = true;
-    elements.soundButtonLabel.textContent = "No audio";
-    elements.soundButton.setAttribute("aria-label", "Audio unavailable");
-    return;
-  }
-
-  elements.soundButton.disabled = false;
-  elements.soundButton.setAttribute("aria-pressed", String(audioState.muted));
-  elements.soundButton.setAttribute(
-    "aria-label",
-    audioState.muted ? "Unmute sound" : "Mute sound"
-  );
-  elements.soundButtonLabel.textContent = audioState.muted ? "Unmute" : "Mute";
-  elements.soundIcon.textContent = audioState.muted ? "×" : "♪";
-}
-
-function createNoiseBuffer(context) {
-  const sampleRate = context.sampleRate || 44100;
-  const buffer = context.createBuffer(1, sampleRate, sampleRate);
-  const samples = buffer.getChannelData(0);
-  let seed = 48271;
-
-  for (let index = 0; index < samples.length; index += 1) {
-    seed = seed * 16807 % 2147483647;
-    samples[index] = seed / 1073741823.5 - 1;
-  }
-
-  return buffer;
-}
-
-function createLoopingNoise(context, buffer, type, frequency, gainNode) {
-  const source = context.createBufferSource();
-  const filter = context.createBiquadFilter();
-
-  source.buffer = buffer;
-  source.loop = true;
-  filter.type = type;
-  filter.frequency.value = frequency;
-  filter.Q.value = 0.7;
-  source.connect(filter);
-  filter.connect(gainNode);
-  source.start();
-
-  return source;
-}
-
-function createAudioEngine() {
-  if (audioState.context) return true;
-
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (typeof AudioContextClass !== "function") {
-    audioState.unavailable = true;
-    updateSoundButton();
-    return false;
-  }
-
-  let context = null;
-
-  try {
-    context = new AudioContextClass();
-    const masterGain = context.createGain();
-    const gasGain = context.createGain();
-    const drinkingGain = context.createGain();
-    const noiseBuffer = createNoiseBuffer(context);
-
-    masterGain.gain.value = 0;
-    gasGain.gain.value = 0;
-    drinkingGain.gain.value = 0;
-    gasGain.connect(masterGain);
-    drinkingGain.connect(masterGain);
-    masterGain.connect(context.destination);
-
-    const gasSource = createLoopingNoise(context, noiseBuffer, "highpass", 2600, gasGain);
-    const drinkingSource = createLoopingNoise(context, noiseBuffer, "bandpass", 850, drinkingGain);
-
-    audioState.context = context;
-    audioState.masterGain = masterGain;
-    audioState.gasGain = gasGain;
-    audioState.drinkingGain = drinkingGain;
-    audioState.sources = [gasSource, drinkingSource];
-    audioState.enabled = true;
-    updateSoundButton();
-    return true;
-  } catch {
-    if (context && typeof context.close === "function") {
-      void context.close().catch(() => {});
-    }
-    audioState.unavailable = true;
-    updateSoundButton();
-    return false;
-  }
-}
-
-function setAudioGain(gainNode, targetKey, target, duration = 0.08) {
-  const context = audioState.context;
-  if (!context || !gainNode || Math.abs((audioState[targetKey] ?? -1) - target) < 0.001) {
-    return;
-  }
-
-  audioState[targetKey] = target;
-  const now = context.currentTime;
-  gainNode.gain.cancelScheduledValues(now);
-  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
-  gainNode.gain.linearRampToValueAtTime(target, now + duration);
-}
-
-function audioCanPlay() {
-  return Boolean(
-    audioState.interacted
-    && audioState.enabled
-    && !audioState.muted
-    && audioState.context
-    && audioState.context.state === "running"
-    && document.visibilityState !== "hidden"
-  );
-}
-
-function syncAudioForState() {
-  if (!audioState.context) return;
-
-  const audible = audioCanPlay();
-  const hasDrink = Boolean(state.drinkKey && state.level > 0);
-  const gasStrength = state.drinkKey === "cola" ? 0.018 : 0.014;
-  const gasLevel = clamp((state.level - 0.45) / 0.55, 0, 1);
-  const gasTarget = audible
-    && hasDrink
-    && motionState.simulationStatus === "ready"
-    && !motionState.isRefilling
-    ? gasStrength * (0.55 + gasLevel * 0.45)
-    : 0;
-  const drinkingTarget = audible
-    && hasDrink
-    && motionState.simulationStatus === "drinking"
-    ? 0.055
-    : 0;
-
-  setAudioGain(audioState.masterGain, "masterTarget", audible ? 0.7 : 0, 0.06);
-  setAudioGain(audioState.gasGain, "gasTarget", gasTarget, 0.12);
-  setAudioGain(audioState.drinkingGain, "drinkingTarget", drinkingTarget, 0.05);
-}
-
-function resumeAudioContext() {
-  const context = audioState.context;
-  if (!context || context.state === "closed") return;
-
-  if (context.state === "running") {
-    syncAudioForState();
-    return;
-  }
-
-  try {
-    const resumeResult = context.resume();
-    if (resumeResult && typeof resumeResult.then === "function") {
-      void resumeResult.then(syncAudioForState).catch(() => {});
-    }
-  } catch {
-    // Sound is optional; motion and manual controls remain available.
-  }
-}
-
-function enableAudioFromUserGesture() {
-  audioState.interacted = true;
-  if (!createAudioEngine()) return;
-  resumeAudioContext();
-}
-
-function playAudioCue(type) {
-  if (!audioCanPlay()) return;
-
-  const context = audioState.context;
-  const oscillator = context.createOscillator();
-  const cueGain = context.createGain();
-  const now = context.currentTime;
-  const isRefill = type === "refill";
-
-  oscillator.type = isRefill ? "sine" : "triangle";
-  oscillator.frequency.setValueAtTime(isRefill ? 280 : 190, now);
-  oscillator.frequency.exponentialRampToValueAtTime(isRefill ? 520 : 92, now + 0.18);
-  cueGain.gain.setValueAtTime(0.0001, now);
-  cueGain.gain.exponentialRampToValueAtTime(isRefill ? 0.055 : 0.045, now + 0.025);
-  cueGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-  oscillator.connect(cueGain);
-  cueGain.connect(audioState.masterGain);
-  oscillator.start(now);
-  oscillator.stop(now + 0.21);
-  oscillator.addEventListener("ended", () => {
-    oscillator.disconnect();
-    cueGain.disconnect();
-  }, { once: true });
-}
-
-function toggleMute() {
-  audioState.muted = !audioState.muted;
-  updateSoundButton();
-
-  if (!audioState.muted && audioState.interacted) {
-    resumeAudioContext();
-  } else {
-    syncAudioForState();
-  }
-
-  elements.liveStatus.textContent = audioState.muted ? "Sound muted." : "Sound unmuted.";
-}
-
-function handleVisibilityChange() {
-  const hidden = document.visibilityState === "hidden";
-  elements.app.classList.toggle("is-background", hidden);
-
-  if (hidden && audioState.context) {
-    setAudioGain(audioState.masterGain, "masterTarget", 0, 0.01);
-    try {
-      const suspendResult = audioState.context.suspend();
-      if (suspendResult && typeof suspendResult.catch === "function") {
-        void suspendResult.catch(() => {});
-      }
-    } catch {
-      // Browsers may already have suspended the context.
-    }
-    return;
-  }
-
-  if (!hidden && audioState.interacted && !audioState.muted) {
-    resumeAudioContext();
-  }
-}
-
-function applyDrinkTheme(drink) {
-  setCssVariable("--accent", drink.accent);
-  setCssVariable("--accent-rgb", drink.accentRgb);
-  setCssVariable("--liquid-top", drink.colors.top);
-  setCssVariable("--liquid-middle", drink.colors.middle);
-  setCssVariable("--liquid-bottom", drink.colors.bottom);
-  setCssVariable("--liquid-glow", drink.colors.glow);
-  setCssVariable("--liquid-reflection", drink.colors.reflection);
-  setCssVariable("--liquid-opacity", String(drink.colors.opacity));
-  setCssVariable("--bubble-color", drink.colors.bubble);
-  setCssVariable("--foam-color", drink.foam.color);
-  setCssVariable("--foam-shadow", drink.foam.shadow);
-  setCssVariable("--foam-height", `${drink.foam.height}px`);
-}
-
-function createBubbles(drink, seedOffset) {
-  const fragment = document.createDocumentFragment();
-  elements.bubbles.replaceChildren();
-
-  for (let index = 0; index < drink.bubbles.count; index += 1) {
-    const bubble = document.createElement("span");
-    const seed = seedOffset + index * 7;
-    const size = drink.bubbles.minimumSize
-      + seededFraction(seed) * (drink.bubbles.maximumSize - drink.bubbles.minimumSize);
-    const speed = drink.bubbles.minimumSpeed
-      + seededFraction(seed + 3)
-        * (drink.bubbles.maximumSpeed - drink.bubbles.minimumSpeed);
-
-    bubble.className = "bubble";
-    bubble.style.setProperty("--bubble-left", `${8 + seededFraction(seed + 1) * 84}%`);
-    bubble.style.setProperty("--bubble-start", `${seededFraction(seed + 2) * 62}%`);
-    bubble.style.setProperty("--bubble-size", `${size.toFixed(1)}px`);
-    bubble.style.setProperty("--bubble-speed", `${speed.toFixed(2)}s`);
-    bubble.style.setProperty("--bubble-delay", `${-seededFraction(seed + 4) * speed}s`);
-    bubble.style.setProperty("--bubble-drift", `${-16 + seededFraction(seed + 5) * 32}px`);
-    fragment.appendChild(bubble);
-  }
-
-  elements.bubbles.appendChild(fragment);
-}
-
-function createFoamCells(count, seedOffset) {
-  const fragment = document.createDocumentFragment();
-  elements.foam.replaceChildren();
-
-  for (let index = 0; index < count; index += 1) {
-    const cell = document.createElement("span");
-    const seed = seedOffset + index * 5;
-    const size = 8 + seededFraction(seed) * 18;
-
-    cell.className = "foam-cell";
-    cell.style.setProperty("--foam-x", `${3 + seededFraction(seed + 1) * 90}%`);
-    cell.style.setProperty("--foam-y", `${-15 + seededFraction(seed + 2) * 55}%`);
-    cell.style.setProperty("--foam-size", `${size.toFixed(1)}px`);
-    cell.style.setProperty("--foam-stretch", (0.78 + seededFraction(seed + 3) * 0.55).toFixed(2));
-    cell.style.setProperty("--foam-cell-opacity", (0.72 + seededFraction(seed + 4) * 0.28).toFixed(2));
-    fragment.appendChild(cell);
-  }
-
-  elements.foam.appendChild(fragment);
-}
-
-function regenerateDrinkEffects() {
-  const drink = DRINKS[state.drinkKey];
-  if (!drink) return;
-
-  state.effectGeneration += 1;
-  const drinkSeed = state.drinkKey === "beer" ? 100 : 300;
-  const generationSeed = state.effectGeneration * 1000;
-  createBubbles(drink, drinkSeed + generationSeed);
-  createFoamCells(drink.foam.cells, drinkSeed + generationSeed + 400);
-}
-
-function syncControls() {
-  const fillPercent = Math.round(state.level * 100);
-  setControlValue(elements.fillControl, String(fillPercent));
-  setControlValue(elements.sideTiltControl, String(state.sideTilt));
-  setControlValue(elements.mouthTiltControl, String(state.mouthTilt));
-  setControlValue(elements.fillOutput, `${fillPercent}%`);
-  setControlValue(elements.sideTiltOutput, `${state.sideTilt}°`);
-  setControlValue(elements.mouthTiltOutput, `${state.mouthTilt}°`);
-}
-
-function renderLiquid(syncManualControls = true) {
-  const usingMotion = motionState.inputMode === "motion" && motionState.calibrated;
-  const drink = DRINKS[state.drinkKey];
-  const sideTilt = usingMotion
-    ? clamp(-motionState.smoothedSide * 18 / MAX_SIDE_DEGREES, -18, 18)
-    : state.sideTilt;
-  const mouthTilt = usingMotion ? clamp(motionState.smoothedMouth, 0, 60) : state.mouthTilt;
-  const fillPercent = Math.round(state.level * 100);
-  const visibleLevel = clamp(100 - state.level * 100 - mouthTilt * 0.12, -8, 100);
-  const surfaceDepth = 0.58 + mouthTilt * 0.011;
-  const glassPitch = mouthTilt * 0.08;
-  const foamScale = clamp(1 - (1 - state.level) * drink.foam.shrink, 0.78, 1);
-  const foamOpacity = state.level <= 0 ? 0 : clamp(0.64 + state.level * 0.36, 0, 1);
-
-  setCssVariable("--liquid-level", `${visibleLevel.toFixed(2)}%`);
-  setCssVariable("--liquid-angle", `${sideTilt.toFixed(2)}deg`);
-  setCssVariable("--surface-depth", surfaceDepth.toFixed(2));
-  setCssVariable("--glass-pitch", `${glassPitch.toFixed(2)}deg`);
-  setCssVariable("--foam-scale", foamScale.toFixed(3));
-  setCssVariable("--foam-opacity", foamOpacity.toFixed(3));
-
-  const isEmpty = state.level <= 0;
-  if (elements.liquid.classList.contains("is-empty") !== isEmpty) {
-    elements.liquid.classList.toggle("is-empty", isEmpty);
-  }
-  setTextContent(elements.fillReadout, `${fillPercent}%`);
-  setTextContent(elements.levelLabel, isEmpty ? "empty" : "full");
-  setControlValue(elements.fillControl, String(fillPercent));
-  setControlValue(elements.fillOutput, `${fillPercent}%`);
-  setAttributeValue(
-    elements.glassWrap,
-    "aria-label",
-    `A glass of ${DRINKS[state.drinkKey].name.toLowerCase()}, ${fillPercent} percent full`
-  );
-
-  if (syncManualControls) syncControls();
-  syncAudioForState();
-}
-
-function setDiagnostics(open) {
-  state.diagnosticsOpen = open;
-  elements.diagnosticPanel.hidden = !open;
-  elements.controlsButton.setAttribute("aria-expanded", String(open));
-  elements.drinkScreen.classList.toggle("controls-open", open);
-
-  if (open) {
-    renderMotionDiagnostics();
-    motionState.lastDiagnosticsFrame = currentFrameTime();
-  }
-}
-
-function selectDrink(drinkKey) {
-  const drink = DRINKS[drinkKey];
-  if (!drink) return;
-
-  state.drinkKey = drinkKey;
-  state.level = drink.initialFill / 100;
-  state.sideTilt = 0;
-  state.mouthTilt = 0;
-  motionState.isRefilling = false;
-  setSimulationStatus("ready");
-
-  elements.app.dataset.drink = drinkKey;
-  elements.currentDrinkName.textContent = drink.name;
-  applyDrinkTheme(drink);
-  regenerateDrinkEffects();
-  renderLiquid();
-  renderMotionDiagnostics();
-  setDiagnostics(debugRequested);
-
-  elements.chooserScreen.hidden = true;
-  elements.drinkScreen.hidden = false;
-  updateCalibrationUi();
-  startAnimationLoop();
-  elements.backButton.focus({ preventScroll: true });
-}
-
-function returnToChooser() {
-  setDiagnostics(false);
-  elements.drinkScreen.hidden = true;
-  elements.chooserScreen.hidden = false;
-  state.drinkKey = null;
-  motionState.isRefilling = false;
-  motionState.lastFrameTime = null;
-  setSimulationStatus("ready");
-  syncAudioForState();
-
-  if (motionState.animationFrameId !== null) {
-    window.cancelAnimationFrame(motionState.animationFrameId);
-    motionState.animationFrameId = null;
-  }
-
-  if (motionState.calibrationTimerId !== null) {
-    window.clearTimeout(motionState.calibrationTimerId);
-    motionState.calibrationTimerId = null;
-    motionState.calibrationSamples = [];
-    setSimulationStatus("ready");
-    updateCalibrationUi();
-  }
-
-  elements.drinkCards[0].focus({ preventScroll: true });
-}
-
-function refillGlass() {
-  if (motionState.calibrationTimerId !== null) {
-    window.clearTimeout(motionState.calibrationTimerId);
-    motionState.calibrationTimerId = null;
-    motionState.calibrationSamples = [];
-    motionState.calibrated = false;
-    motionState.inputMode = "manual";
-  }
-
-  state.sideTilt = 0;
-  state.mouthTilt = 0;
-  motionState.isRefilling = !prefersReducedMotion && state.level < 1;
-  regenerateDrinkEffects();
-  setSimulationStatus("ready");
-
-  if (prefersReducedMotion) state.level = 1;
-  playAudioCue("refill");
-
-  if (motionState.isRefilling) {
-    setMotionMessage("Refilling…", "success");
-  } else {
-    state.level = 1;
-    setMotionMessage("The glass is full.", "success");
-  }
-
-  if (motionState.listenerRegistered && !motionState.calibrated) {
-    updateCalibrationUi("Hold your phone upright and tap Calibrate");
-  }
-
-  renderLiquid();
-  renderMotionDiagnostics();
-  startAnimationLoop();
+function createSvgElement(tagName) {
+  return document.createElementNS(SVG_NAMESPACE, tagName);
 }
 
 function readNumber(input) {
@@ -702,319 +223,1019 @@ function formatEventTime(date) {
 }
 
 function setMotionMessage(message, tone = "neutral") {
-  elements.motionMessage.textContent = message;
+  setTextContent(elements.motionMessage, message);
   elements.motionMessage.dataset.tone = tone;
 }
 
-function setSimulationStatus(status) {
-  motionState.simulationStatus = status;
-  syncAudioForState();
+function currentDrink() {
+  return DRINKS[simulationState.drinkKey] || null;
 }
 
-function updateCalibrationUi(message = "") {
-  elements.calibrationCard.hidden = !motionState.listenerRegistered;
-  if (!motionState.listenerRegistered) return;
+function currentGeometry() {
+  const drink = currentDrink();
+  return drink ? GLASS_GEOMETRIES[drink.glassKey] : null;
+}
 
-  if (motionState.simulationStatus === "calibrating") {
-    elements.calibrationPrompt.textContent = message || "Keep your phone upright and still…";
-    elements.calibrateButton.textContent = "Calibrating…";
+// Glass configuration and SVG rendering
+function applyDrinkTheme(drink) {
+  setCssVariable("--accent", drink.accent);
+  setCssVariable("--accent-rgb", drink.accentRgb);
+  setCssVariable("--liquid-top", drink.colors.top);
+  setCssVariable("--liquid-middle", drink.colors.middle);
+  setCssVariable("--liquid-bottom", drink.colors.bottom);
+  setCssVariable("--liquid-edge", drink.colors.edge);
+  setCssVariable("--liquid-transmitted", drink.colors.transmitted);
+  setCssVariable("--liquid-highlight", drink.colors.highlight);
+  setCssVariable("--foam-color", drink.foam.color);
+  setCssVariable("--foam-shadow", drink.foam.shadow);
+  setCssVariable("--bubble-color", drink.colors.bubble);
+}
+
+function setEllipseGeometry(element, ellipse) {
+  setAttributeValue(element, "cx", String(ellipse.cx));
+  setAttributeValue(element, "cy", String(ellipse.cy));
+  setAttributeValue(element, "rx", String(ellipse.rx));
+  setAttributeValue(element, "ry", String(ellipse.ry));
+}
+
+function applyGlassGeometry(drink, geometry) {
+  if (renderCache.glassKey === drink.glassKey) return;
+  renderCache.glassKey = drink.glassKey;
+  renderCache.geometryKey = "";
+
+  const cavityPath = polygonToPath(geometry.cavity);
+  setAttributeValue(elements.glassSvg, "viewBox", geometry.viewBox);
+  setAttributeValue(elements.cavityClipPath, "d", cavityPath);
+  setAttributeValue(elements.cavityOutline, "d", cavityPath);
+  setAttributeValue(elements.glassOuterPath, "d", geometry.outerPath);
+  setAttributeValue(elements.glassWallOverlay, "d", geometry.wallOverlayPath);
+
+  elements.glassHandleGroup.hidden = !geometry.handlePath;
+  setAttributeValue(elements.glassHandleOuter, "d", geometry.handlePath);
+  setAttributeValue(elements.glassHandleInner, "d", geometry.handlePath);
+
+  setEllipseGeometry(elements.glassRimOuter, geometry.rim);
+  setEllipseGeometry(elements.glassRimInner, {
+    cx: geometry.rim.cx,
+    cy: geometry.rim.cy + 1,
+    rx: geometry.rim.innerRx,
+    ry: geometry.rim.innerRy
+  });
+  setEllipseGeometry(elements.glassBase, geometry.base);
+
+  const reflectionElements = [
+    elements.glassReflectionPrimary,
+    elements.glassReflectionSecondary,
+    elements.glassReflectionEdge
+  ];
+  reflectionElements.forEach((element, index) => {
+    setAttributeValue(element, "d", geometry.reflections[index] || "");
+  });
+}
+
+function createBubbles(drink, geometry, seedOffset) {
+  const fragment = document.createDocumentFragment();
+  elements.bubbles.replaceChildren();
+
+  const minimumX = Math.min(...geometry.cavity.map((point) => point.x));
+  const maximumX = Math.max(...geometry.cavity.map((point) => point.x));
+  const maximumY = Math.max(...geometry.cavity.map((point) => point.y));
+
+  for (let index = 0; index < drink.bubbles.count; index += 1) {
+    const bubble = createSvgElement("circle");
+    const seed = seedOffset + index * 11;
+    const radius = drink.bubbles.minimumSize
+      + seededFraction(seed) * (drink.bubbles.maximumSize - drink.bubbles.minimumSize);
+    const speed = drink.bubbles.minimumSpeed
+      + seededFraction(seed + 3)
+        * (drink.bubbles.maximumSpeed - drink.bubbles.minimumSpeed);
+
+    bubble.classList.add("bubble");
+    bubble.setAttribute("cx", (minimumX + 18 + seededFraction(seed + 1) * (maximumX - minimumX - 36)).toFixed(2));
+    bubble.setAttribute("cy", (maximumY - 22 - seededFraction(seed + 2) * 300).toFixed(2));
+    bubble.setAttribute("r", radius.toFixed(2));
+    bubble.style.setProperty("--bubble-speed", `${speed.toFixed(2)}s`);
+    bubble.style.setProperty("--bubble-delay", `${(-seededFraction(seed + 4) * speed).toFixed(2)}s`);
+    bubble.style.setProperty("--bubble-drift", `${(-9 + seededFraction(seed + 5) * 18).toFixed(2)}px`);
+    fragment.appendChild(bubble);
+  }
+
+  elements.bubbles.appendChild(fragment);
+}
+
+function createFoamCells(drink, seedOffset) {
+  const fragment = document.createDocumentFragment();
+  elements.foamCells.replaceChildren();
+
+  for (let index = 0; index < drink.foam.cells; index += 1) {
+    const cell = createSvgElement("circle");
+    const seed = seedOffset + index * 7;
+    const radius = drink.foam.cellMin
+      + seededFraction(seed) * (drink.foam.cellMax - drink.foam.cellMin);
+
+    cell.classList.add("foam-cell");
+    cell.dataset.position = (0.04 + seededFraction(seed + 1) * 0.92).toFixed(4);
+    cell.dataset.depth = (0.18 + seededFraction(seed + 2) * 0.66).toFixed(4);
+    cell.setAttribute("r", radius.toFixed(2));
+    cell.style.setProperty("--foam-cell-opacity", (0.55 + seededFraction(seed + 3) * 0.38).toFixed(2));
+    fragment.appendChild(cell);
+  }
+
+  elements.foamCells.appendChild(fragment);
+}
+
+function regenerateDrinkEffects() {
+  const drink = currentDrink();
+  const geometry = currentGeometry();
+  if (!drink || !geometry) return;
+
+  simulationState.effectGeneration += 1;
+  const drinkSeed = simulationState.drinkKey === "beer" ? 170 : 410;
+  const generationSeed = simulationState.effectGeneration * 1000;
+  createBubbles(drink, geometry, drinkSeed + generationSeed);
+  createFoamCells(drink, drinkSeed + generationSeed + 500);
+}
+
+function positionFoamCells(segment, gravity, thickness) {
+  const cells = elements.foamCells.children;
+  if (!segment) {
+    elements.foamCells.setAttribute("visibility", "hidden");
+    return;
+  }
+
+  elements.foamCells.removeAttribute("visibility");
+  const deltaX = segment.end.x - segment.start.x;
+  const deltaY = segment.end.y - segment.start.y;
+
+  Array.from(cells).forEach((cell) => {
+    const position = Number.parseFloat(cell.dataset.position);
+    const depth = Number.parseFloat(cell.dataset.depth) * thickness;
+    const centerX = segment.start.x + deltaX * position + gravity.x * depth;
+    const centerY = segment.start.y + deltaY * position + gravity.y * depth;
+    setAttributeValue(cell, "cx", centerX.toFixed(2));
+    setAttributeValue(cell, "cy", centerY.toFixed(2));
+  });
+}
+
+function updateCapacityForCurrentAngle() {
+  const geometry = currentGeometry();
+  if (!geometry) return null;
+
+  const capacity = capacityAtAngle(
+    geometry.cavity,
+    geometry.rimLeft,
+    geometry.rimRight,
+    sensorState.clampedSideTilt
+  );
+  simulationState.capacityFraction = capacity.capacityFraction;
+  simulationState.lowerLip = capacity.lowerLip;
+  simulationState.overflowAmount = Math.max(
+    0,
+    simulationState.fillLevel - capacity.capacityFraction
+  );
+  return capacity;
+}
+
+function renderLiquidGeometry(force = false) {
+  const drink = currentDrink();
+  const geometry = currentGeometry();
+  if (!drink || !geometry) return;
+
+  const angle = sensorState.clampedSideTilt;
+  const geometryKey = [
+    simulationState.drinkKey,
+    simulationState.fillLevel.toFixed(5),
+    angle.toFixed(3),
+    simulationState.effectGeneration
+  ].join("|");
+  if (!force && geometryKey === renderCache.geometryKey) return;
+  renderCache.geometryKey = geometryKey;
+
+  const gravity = gravityFromAngle(angle);
+  const liquid = thresholdForAreaFraction(
+    geometry.cavity,
+    gravity,
+    simulationState.fillLevel
+  );
+  const liquidPath = polygonToPath(liquid.polygon);
+  const foamThickness = drink.foam.thickness * (0.72 + simulationState.fillLevel * 0.28);
+  const foamPolygon = simulationState.fillLevel > 0.001
+    ? foamBandPolygon(geometry.cavity, gravity, liquid.threshold, foamThickness)
+    : [];
+  const segment = simulationState.fillLevel > 0.001
+    ? surfaceSegment(geometry.cavity, gravity, liquid.threshold)
+    : null;
+
+  setAttributeValue(elements.liquidShape, "d", liquidPath);
+  setAttributeValue(elements.liquidLight, "d", liquidPath);
+  setAttributeValue(elements.liquidClipPath, "d", liquidPath);
+  setAttributeValue(elements.foamShape, "d", polygonToPath(foamPolygon));
+  setAttributeValue(
+    elements.meniscusPath,
+    "d",
+    segment
+      ? `M${segment.start.x.toFixed(2)} ${segment.start.y.toFixed(2)} L${segment.end.x.toFixed(2)} ${segment.end.y.toFixed(2)}`
+      : ""
+  );
+  positionFoamCells(segment, gravity, foamThickness);
+
+  setCssVariable("--bubble-rise-x", `${(-gravity.x * 410).toFixed(2)}px`);
+  setCssVariable("--bubble-rise-y", `${(-gravity.y * 410).toFixed(2)}px`);
+}
+
+function syncControls() {
+  const fillPercent = Math.round(simulationState.fillLevel * 100);
+  const manualAngle = Math.round(sensorState.clampedSideTilt);
+  setControlValue(elements.fillControl, String(fillPercent));
+  setControlValue(elements.sideTiltControl, String(manualAngle));
+  setControlValue(elements.fillOutput, `${fillPercent}%`);
+  setControlValue(elements.sideTiltOutput, `${manualAngle}°`);
+}
+
+function renderInterface(syncManualControls = true) {
+  const drink = currentDrink();
+  if (!drink) return;
+
+  const fillPercent = Math.round(simulationState.fillLevel * 100);
+  let levelLabel = "remaining";
+  if (simulationState.physicsStatus === "empty") levelLabel = "empty";
+  if (simulationState.physicsStatus === "spilling") levelLabel = "spilling";
+  if (simulationState.physicsStatus === "refilling") levelLabel = "refilling";
+
+  setTextContent(elements.fillReadout, `${fillPercent}%`);
+  setTextContent(elements.levelLabel, levelLabel);
+  setControlValue(elements.fillControl, String(fillPercent));
+  setControlValue(elements.fillOutput, `${fillPercent}%`);
+  setAttributeValue(
+    elements.glassWrap,
+    "aria-label",
+    `A glass of ${drink.name.toLowerCase()}, ${fillPercent} percent full`
+  );
+  elements.app.dataset.physicsState = simulationState.physicsStatus;
+
+  if (syncManualControls) syncControls();
+}
+
+// Event-based Web Audio
+function updateSoundButton() {
+  if (audioState.unavailable) {
+    elements.soundButton.disabled = true;
+    setTextContent(elements.soundButtonLabel, "No audio");
+    setAttributeValue(elements.soundButton, "aria-label", "Audio unavailable");
+    return;
+  }
+
+  elements.soundButton.disabled = false;
+  setAttributeValue(elements.soundButton, "aria-pressed", String(audioState.muted));
+  setAttributeValue(
+    elements.soundButton,
+    "aria-label",
+    audioState.muted ? "Unmute sound" : "Mute sound"
+  );
+  setTextContent(elements.soundButtonLabel, audioState.muted ? "Unmute" : "Mute");
+  setTextContent(elements.soundIcon, audioState.muted ? "×" : "♪");
+}
+
+function createNoiseBuffer(context) {
+  const sampleRate = context.sampleRate || 44100;
+  const buffer = context.createBuffer(1, sampleRate, sampleRate);
+  const samples = buffer.getChannelData(0);
+  let seed = 48271;
+
+  for (let index = 0; index < samples.length; index += 1) {
+    seed = seed * 16807 % 2147483647;
+    samples[index] = seed / 1073741823.5 - 1;
+  }
+
+  return buffer;
+}
+
+function createAudioEngine() {
+  if (audioState.context) return true;
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextClass !== "function") {
+    audioState.unavailable = true;
+    updateSoundButton();
+    return false;
+  }
+
+  let context = null;
+  try {
+    context = new AudioContextClass();
+    const masterGain = context.createGain();
+    masterGain.gain.value = 0;
+    masterGain.connect(context.destination);
+
+    audioState.context = context;
+    audioState.masterGain = masterGain;
+    audioState.noiseBuffer = createNoiseBuffer(context);
+    updateSoundButton();
+    return true;
+  } catch {
+    if (context && typeof context.close === "function") {
+      void context.close().catch(() => {});
+    }
+    audioState.unavailable = true;
+    updateSoundButton();
+    return false;
+  }
+}
+
+function audioCanPlay() {
+  return Boolean(
+    audioState.interacted
+    && !audioState.muted
+    && audioState.context
+    && audioState.context.state === "running"
+    && document.visibilityState !== "hidden"
+  );
+}
+
+function setMasterVolume(value) {
+  const context = audioState.context;
+  const gain = audioState.masterGain;
+  if (!context || !gain) return;
+  const now = context.currentTime;
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(value, now);
+}
+
+function trackAudioSource(source) {
+  audioState.activeSources.add(source);
+  source.addEventListener("ended", () => {
+    audioState.activeSources.delete(source);
+    try {
+      source.disconnect();
+    } catch {
+      // A stopped source may already be disconnected by the browser.
+    }
+  }, { once: true });
+}
+
+function stopActiveAudioEvents() {
+  audioState.activeSources.forEach((source) => {
+    try {
+      source.stop();
+    } catch {
+      // The source may have ended between scheduling and cancellation.
+    }
+    try {
+      source.disconnect();
+    } catch {
+      // Disconnection is best effort.
+    }
+  });
+  audioState.activeSources.clear();
+  audioState.nextSpillEventAt = 0;
+}
+
+function cancelAmbientBubble() {
+  if (audioState.ambientTimerId === null) return;
+  window.clearTimeout(audioState.ambientTimerId);
+  audioState.ambientTimerId = null;
+}
+
+function playNoiseBurst({ duration, frequency, filterType, volume }) {
+  if (!audioCanPlay() || !audioState.noiseBuffer) return;
+
+  const context = audioState.context;
+  const source = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+  const now = context.currentTime;
+  const safeDuration = clamp(duration, 0.04, 0.45);
+
+  source.buffer = audioState.noiseBuffer;
+  source.loop = false;
+  filter.type = filterType;
+  filter.frequency.value = frequency;
+  filter.Q.value = 0.8;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + safeDuration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(audioState.masterGain);
+  trackAudioSource(source);
+  source.start(now, seededFraction(audioState.eventSequence + 9) * 0.5, safeDuration);
+  source.stop(now + safeDuration + 0.01);
+}
+
+function playToneBurst({ frequency, endFrequency, duration, volume, type = "sine" }) {
+  if (!audioCanPlay()) return;
+
+  const context = audioState.context;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const now = context.currentTime;
+  const safeDuration = clamp(duration, 0.04, 0.35);
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, endFrequency), now + safeDuration);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.014);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + safeDuration);
+  oscillator.connect(gain);
+  gain.connect(audioState.masterGain);
+  trackAudioSource(oscillator);
+  oscillator.start(now);
+  oscillator.stop(now + safeDuration + 0.01);
+}
+
+function playAmbientBubble() {
+  const drink = currentDrink();
+  if (!drink || simulationState.physicsStatus !== "ready" || simulationState.fillLevel <= 0) return;
+  audioState.eventSequence += 1;
+  const variation = 0.9 + seededFraction(audioState.eventSequence + 17) * 0.2;
+  playToneBurst({
+    frequency: drink.audio.bubblePitch * variation,
+    endFrequency: drink.audio.bubblePitch * variation * 1.24,
+    duration: 0.055 + seededFraction(audioState.eventSequence + 21) * 0.045,
+    volume: simulationState.drinkKey === "cola" ? 0.018 : 0.014,
+    type: "sine"
+  });
+}
+
+function scheduleAmbientBubble() {
+  const drink = currentDrink();
+  if (
+    !drink
+    || audioState.ambientTimerId !== null
+    || !audioCanPlay()
+    || simulationState.physicsStatus !== "ready"
+    || simulationState.fillLevel <= 0
+  ) {
+    return;
+  }
+
+  const span = drink.audio.ambientMaximumMs - drink.audio.ambientMinimumMs;
+  const delay = drink.audio.ambientMinimumMs
+    + seededFraction(audioState.eventSequence + 31) * span;
+  audioState.ambientTimerId = window.setTimeout(() => {
+    audioState.ambientTimerId = null;
+    playAmbientBubble();
+    scheduleAmbientBubble();
+  }, delay);
+}
+
+function playSpillEvent(flowRate) {
+  const drink = currentDrink();
+  if (!drink || !audioCanPlay()) return;
+  audioState.eventSequence += 1;
+  const intensity = clamp(flowRate / 0.2, 0, 1);
+  const variation = 0.88 + seededFraction(audioState.eventSequence + 43) * 0.25;
+
+  playNoiseBurst({
+    duration: 0.08 + intensity * 0.12,
+    frequency: drink.audio.spillPitch * (3.6 + variation),
+    filterType: "bandpass",
+    volume: drink.audio.spillVolume * (0.55 + intensity * 0.45)
+  });
+
+  if (audioState.eventSequence % 3 === 0) {
+    playToneBurst({
+      frequency: drink.audio.spillPitch * variation,
+      endFrequency: drink.audio.spillPitch * variation * 0.72,
+      duration: 0.11 + intensity * 0.06,
+      volume: 0.018 + intensity * 0.014,
+      type: "triangle"
+    });
+  }
+}
+
+function playRefillEvent() {
+  const drink = currentDrink();
+  if (!drink) return;
+  audioState.eventSequence += 1;
+  playNoiseBurst({
+    duration: 0.32,
+    frequency: simulationState.drinkKey === "cola" ? 720 : 980,
+    filterType: "bandpass",
+    volume: 0.032
+  });
+  playToneBurst({
+    frequency: drink.audio.spillPitch * 1.25,
+    endFrequency: drink.audio.spillPitch * 1.7,
+    duration: 0.19,
+    volume: 0.022,
+    type: "sine"
+  });
+}
+
+function playEmptyEvent() {
+  const drink = currentDrink();
+  if (!drink) return;
+  audioState.eventSequence += 1;
+  playToneBurst({
+    frequency: drink.audio.spillPitch,
+    endFrequency: drink.audio.spillPitch * 0.58,
+    duration: 0.18,
+    volume: 0.026,
+    type: "triangle"
+  });
+}
+
+function audioDiagnosticState() {
+  if (audioState.unavailable) return "unavailable";
+  if (!audioState.interacted) return "not-started";
+  if (audioState.muted) return "muted";
+  if (!audioState.context || audioState.context.state !== "running") return "suspended";
+  if (simulationState.physicsStatus === "spilling") return "spill-events";
+  if (simulationState.physicsStatus === "refilling") return "refill-event";
+  if (audioState.ambientTimerId !== null) return "ambient-wait";
+  return "silent";
+}
+
+function syncAudioScheduling(previousStatus = simulationState.physicsStatus) {
+  if (
+    (previousStatus === "spilling" && simulationState.physicsStatus !== "spilling")
+    || (previousStatus === "refilling" && simulationState.physicsStatus !== "refilling")
+  ) {
+    stopActiveAudioEvents();
+  }
+
+  if (!audioCanPlay() || simulationState.physicsStatus !== "ready") {
+    cancelAmbientBubble();
+  } else {
+    scheduleAmbientBubble();
+  }
+}
+
+function resumeAudioContext() {
+  const context = audioState.context;
+  if (!context || context.state === "closed") return;
+
+  if (context.state === "running") {
+    setMasterVolume(audioState.muted ? 0 : 0.72);
+    syncAudioScheduling();
+    return;
+  }
+
+  try {
+    const resumeResult = context.resume();
+    if (resumeResult && typeof resumeResult.then === "function") {
+      void resumeResult.then(() => {
+        setMasterVolume(audioState.muted ? 0 : 0.72);
+        syncAudioScheduling();
+      }).catch(() => {});
+    }
+  } catch {
+    // Motion and manual simulation remain available without sound.
+  }
+}
+
+function enableAudioFromUserGesture() {
+  audioState.interacted = true;
+  if (!createAudioEngine()) return;
+  resumeAudioContext();
+}
+
+function toggleMute() {
+  audioState.muted = !audioState.muted;
+  updateSoundButton();
+
+  if (audioState.muted) {
+    cancelAmbientBubble();
+    stopActiveAudioEvents();
+    setMasterVolume(0);
+  } else if (audioState.interacted) {
+    resumeAudioContext();
+  }
+
+  setTextContent(elements.liveStatus, audioState.muted ? "Sound muted." : "Sound unmuted.");
+  renderDiagnostics();
+}
+
+function handleVisibilityChange() {
+  const hidden = document.visibilityState === "hidden";
+  elements.app.classList.toggle("is-background", hidden);
+
+  if (hidden) {
+    cancelAmbientBubble();
+    stopActiveAudioEvents();
+    setMasterVolume(0);
+    if (audioState.context) {
+      try {
+        const suspendResult = audioState.context.suspend();
+        if (suspendResult && typeof suspendResult.catch === "function") {
+          void suspendResult.catch(() => {});
+        }
+      } catch {
+        // Browsers may have suspended the context already.
+      }
+    }
+    return;
+  }
+
+  if (audioState.interacted && !audioState.muted) resumeAudioContext();
+}
+
+// Simulation loop and state transitions
+function setPhysicsStatus(status) {
+  const previousStatus = simulationState.physicsStatus;
+  if (previousStatus === status) return;
+  simulationState.physicsStatus = status;
+  syncAudioScheduling(previousStatus);
+
+  if (status === "spilling") {
+    setMotionMessage("Spilling… Hold this angle or tilt farther to continue.", "success");
+  } else if (status === "ready" && previousStatus === "spilling") {
+    setMotionMessage("Flow stopped at this angle. Tilt farther to keep drinking.", "success");
+  } else if (status === "refilling") {
+    setMotionMessage("Refilling…", "success");
+  } else if (status === "empty") {
+    setMotionMessage("Empty — tap Refill", "warning");
+  }
+}
+
+function handleEmptyGlass() {
+  const wasEmpty = simulationState.physicsStatus === "empty" && simulationState.fillLevel === 0;
+  simulationState.fillLevel = 0;
+  simulationState.isRefilling = false;
+  simulationState.capacityFraction = clamp(simulationState.capacityFraction, 0, 1);
+  simulationState.overflowAmount = 0;
+  simulationState.flowRate = 0;
+  setPhysicsStatus("empty");
+  cancelAmbientBubble();
+  stopActiveAudioEvents();
+
+  if (!wasEmpty && simulationState.drinkKey) {
+    playEmptyEvent();
+    setTextContent(elements.liveStatus, `${currentDrink().name} is empty. Tap Refill.`);
+  }
+}
+
+function updateFilteredSideTilt(deltaTime) {
+  if (sensorState.inputMode === "manual") {
+    sensorState.filteredSideTilt = sensorState.rawSideTilt;
+  } else {
+    const smoothing = prefersReducedMotion
+      ? 1
+      : 1 - Math.exp(-SMOOTHING_RESPONSE * deltaTime);
+    sensorState.filteredSideTilt += (
+      sensorState.rawSideTilt - sensorState.filteredSideTilt
+    ) * smoothing;
+  }
+  sensorState.clampedSideTilt = clamp(
+    sensorState.filteredSideTilt,
+    -MAX_SIDE_DEGREES,
+    MAX_SIDE_DEGREES
+  );
+}
+
+function scheduleSpillAudio(timestamp) {
+  if (simulationState.physicsStatus !== "spilling" || !audioCanPlay()) return;
+  if (timestamp < audioState.nextSpillEventAt) return;
+
+  playSpillEvent(simulationState.flowRate);
+  const intensity = clamp(simulationState.flowRate / 0.2, 0, 1);
+  const randomness = seededFraction(audioState.eventSequence + 57);
+  audioState.nextSpillEventAt = timestamp + 260 + (1 - intensity) * 250 + randomness * 190;
+}
+
+function startAnimationLoop() {
+  if (!simulationState.drinkKey || simulationState.animationFrameId !== null) return;
+  simulationState.lastFrameTime = null;
+  simulationState.animationFrameId = window.requestAnimationFrame(animateSimulation);
+}
+
+function shouldContinueAnimation() {
+  if (simulationState.isRefilling) return true;
+  if (sensorState.inputMode === "motion" && sensorState.calibrated) {
+    return simulationState.physicsStatus !== "empty";
+  }
+  return simulationState.physicsStatus === "spilling";
+}
+
+function animateSimulation(timestamp) {
+  simulationState.animationFrameId = null;
+  if (!simulationState.drinkKey) {
+    simulationState.lastFrameTime = null;
+    return;
+  }
+
+  const elapsed = simulationState.lastFrameTime === null
+    ? 1 / 60
+    : (timestamp - simulationState.lastFrameTime) / 1000;
+  const deltaTime = clamp(elapsed, 0, 0.05);
+  simulationState.lastFrameTime = timestamp;
+
+  updateFilteredSideTilt(deltaTime);
+  updateCapacityForCurrentAngle();
+
+  if (simulationState.isRefilling) {
+    simulationState.fillLevel = clamp(
+      simulationState.fillLevel + REFILL_RATE * deltaTime,
+      0,
+      1
+    );
+    simulationState.overflowAmount = Math.max(
+      0,
+      simulationState.fillLevel - simulationState.capacityFraction
+    );
+
+    if (simulationState.fillLevel >= 1) {
+      simulationState.fillLevel = 1;
+      simulationState.isRefilling = false;
+      simulationState.flowRate = 0;
+      setPhysicsStatus("ready");
+      setMotionMessage(
+        sensorState.inputMode === "motion" && sensorState.calibrated
+          ? "Refilled. Tilt sideways until the surface reaches the rim."
+          : "Refilled. Manual side tilt is ready.",
+        "success"
+      );
+      setTextContent(elements.liveStatus, `${currentDrink().name} refilled to 100 percent.`);
+    }
+  } else if (simulationState.fillLevel > 0) {
+    const spill = stepSpill({
+      fillLevel: simulationState.fillLevel,
+      capacityFraction: simulationState.capacityFraction,
+      angleDegrees: sensorState.clampedSideTilt,
+      deltaTime,
+      wasSpilling: simulationState.physicsStatus === "spilling"
+    });
+    simulationState.fillLevel = spill.fillLevel;
+    simulationState.overflowAmount = spill.overflowAmount;
+    simulationState.flowRate = spill.flowRate;
+
+    if (spill.spilling) setPhysicsStatus("spilling");
+    else if (simulationState.physicsStatus === "spilling") setPhysicsStatus("ready");
+  }
+
+  if (simulationState.fillLevel <= 0.000001) handleEmptyGlass();
+
+  renderLiquidGeometry();
+  renderInterface(false);
+  scheduleSpillAudio(timestamp);
+
+  if (
+    simulationState.diagnosticsOpen
+    && timestamp - simulationState.lastDiagnosticsFrame >= DIAGNOSTIC_INTERVAL_MS
+  ) {
+    renderDiagnostics();
+    simulationState.lastDiagnosticsFrame = timestamp;
+  }
+
+  if (shouldContinueAnimation()) {
+    simulationState.animationFrameId = window.requestAnimationFrame(animateSimulation);
+  } else {
+    simulationState.lastFrameTime = null;
+    if (simulationState.diagnosticsOpen) {
+      renderDiagnostics();
+      simulationState.lastDiagnosticsFrame = timestamp;
+    }
+  }
+}
+
+function activateManualMode() {
+  sensorState.inputMode = "manual";
+  sensorState.calibrated = false;
+  sensorState.calibrating = false;
+  if (sensorState.calibrationTimerId !== null) {
+    window.clearTimeout(sensorState.calibrationTimerId);
+    sensorState.calibrationTimerId = null;
+  }
+  updateCalibrationUi();
+}
+
+function setManualSideTilt(angle) {
+  activateManualMode();
+  sensorState.rawSideTilt = clamp(angle, -MAX_SIDE_DEGREES, MAX_SIDE_DEGREES);
+  sensorState.filteredSideTilt = sensorState.rawSideTilt;
+  sensorState.clampedSideTilt = sensorState.rawSideTilt;
+  updateCapacityForCurrentAngle();
+  renderLiquidGeometry(true);
+  renderInterface();
+  renderDiagnostics();
+  startAnimationLoop();
+}
+
+function refillGlass() {
+  if (sensorState.calibrationTimerId !== null) {
+    window.clearTimeout(sensorState.calibrationTimerId);
+    sensorState.calibrationTimerId = null;
+    sensorState.calibrationSamples = [];
+    sensorState.calibrating = false;
+  }
+
+  if (sensorState.inputMode === "manual") {
+    sensorState.rawSideTilt = 0;
+    sensorState.filteredSideTilt = 0;
+    sensorState.clampedSideTilt = 0;
+  }
+
+  simulationState.isRefilling = !prefersReducedMotion && simulationState.fillLevel < 1;
+  simulationState.flowRate = 0;
+  regenerateDrinkEffects();
+  updateCapacityForCurrentAngle();
+  stopActiveAudioEvents();
+  cancelAmbientBubble();
+
+  if (simulationState.isRefilling) {
+    setPhysicsStatus("refilling");
+    playRefillEvent();
+  } else {
+    simulationState.fillLevel = 1;
+    setPhysicsStatus("ready");
+    setMotionMessage("The glass is full.", "success");
+  }
+
+  renderLiquidGeometry(true);
+  renderInterface();
+  renderDiagnostics();
+  startAnimationLoop();
+}
+
+function selectDrink(drinkKey) {
+  const drink = DRINKS[drinkKey];
+  const geometry = drink ? GLASS_GEOMETRIES[drink.glassKey] : null;
+  if (!drink || !geometry) return;
+
+  cancelAmbientBubble();
+  stopActiveAudioEvents();
+  simulationState.drinkKey = drinkKey;
+  simulationState.fillLevel = drink.initialFill;
+  simulationState.isRefilling = false;
+  simulationState.flowRate = 0;
+  simulationState.physicsStatus = "ready";
+  sensorState.rawSideTilt = 0;
+  sensorState.filteredSideTilt = 0;
+  sensorState.clampedSideTilt = 0;
+  if (!sensorState.calibrated) sensorState.inputMode = "manual";
+
+  elements.app.dataset.drink = drinkKey;
+  setTextContent(elements.currentDrinkName, drink.name);
+  applyDrinkTheme(drink);
+  applyGlassGeometry(drink, geometry);
+  regenerateDrinkEffects();
+  updateCapacityForCurrentAngle();
+  renderLiquidGeometry(true);
+  renderInterface();
+  renderDiagnostics();
+  setDiagnostics(debugRequested);
+
+  elements.chooserScreen.hidden = true;
+  elements.drinkScreen.hidden = false;
+  updateCalibrationUi();
+  syncAudioScheduling();
+  startAnimationLoop();
+  elements.backButton.focus({ preventScroll: true });
+}
+
+function returnToChooser() {
+  setDiagnostics(false);
+  elements.drinkScreen.hidden = true;
+  elements.chooserScreen.hidden = false;
+  simulationState.drinkKey = null;
+  simulationState.isRefilling = false;
+  simulationState.lastFrameTime = null;
+  cancelAmbientBubble();
+  stopActiveAudioEvents();
+
+  if (simulationState.animationFrameId !== null) {
+    window.cancelAnimationFrame(simulationState.animationFrameId);
+    simulationState.animationFrameId = null;
+  }
+
+  if (sensorState.calibrationTimerId !== null) {
+    window.clearTimeout(sensorState.calibrationTimerId);
+    sensorState.calibrationTimerId = null;
+    sensorState.calibrationSamples = [];
+    sensorState.calibrating = false;
+    updateCalibrationUi();
+  }
+
+  elements.drinkCards[0].focus({ preventScroll: true });
+}
+
+// Sensor access and calibration
+function updateCalibrationUi(message = "") {
+  elements.calibrationCard.hidden = !sensorState.listenerRegistered;
+  if (!sensorState.listenerRegistered) return;
+
+  if (sensorState.calibrating) {
+    setTextContent(elements.calibrationPrompt, message || "Keep your phone upright and still…");
+    setTextContent(elements.calibrateButton, "Calibrating…");
     elements.calibrateButton.disabled = true;
     return;
   }
 
-  elements.calibrationPrompt.textContent = message || (
-    motionState.calibrated
-      ? "Calibrated. Tilt the top edge toward your mouth."
-      : "Hold your phone upright and tap Calibrate"
+  setTextContent(
+    elements.calibrationPrompt,
+    message || (
+      sensorState.calibrated
+        ? "Calibrated. Tilt sideways until the liquid reaches a rim."
+        : "Hold your phone upright and tap Calibrate"
+    )
   );
-  elements.calibrateButton.textContent = motionState.calibrated ? "Recalibrate" : "Calibrate";
+  setTextContent(elements.calibrateButton, sensorState.calibrated ? "Recalibrate" : "Calibrate");
   elements.calibrateButton.disabled = false;
 }
 
-function updateCalculatedAngles() {
-  if (
-    !motionState.calibrated
-    || !Number.isFinite(motionState.beta)
-    || !Number.isFinite(motionState.gamma)
-  ) {
-    motionState.calculatedMouth = 0;
-    motionState.calculatedSide = 0;
+function finishCalibration() {
+  sensorState.calibrationTimerId = null;
+  const samples = sensorState.calibrationSamples;
+  sensorState.calibrationSamples = [];
+  sensorState.calibrating = false;
+
+  if (samples.length < MIN_CALIBRATION_SAMPLES) {
+    sensorState.calibrated = false;
+    sensorState.inputMode = "manual";
+    updateCalibrationUi("Not enough readings. Keep the phone upright and try again.");
+    setMotionMessage(
+      "Calibration needs more valid readings. Manual controls remain fully functional.",
+      "warning"
+    );
+    renderDiagnostics();
     return;
   }
 
-  const betaDifference = normalizeAngleDifference(motionState.beta, motionState.betaBase);
-  const gammaDifference = normalizeAngleDifference(motionState.gamma, motionState.gammaBase);
-  const drinkingDirection = motionState.invertDirection ? 1 : -1;
-
-  motionState.calculatedMouth = clamp(
-    betaDifference * drinkingDirection,
-    0,
-    MAX_MOUTH_DEGREES
-  );
-  motionState.calculatedSide = clamp(gammaDifference, -MAX_SIDE_DEGREES, MAX_SIDE_DEGREES);
+  sensorState.gammaBase = circularMeanDegrees(samples);
+  sensorState.calibrated = true;
+  sensorState.inputMode = "motion";
+  sensorState.rawSideTilt = 0;
+  sensorState.filteredSideTilt = 0;
+  sensorState.clampedSideTilt = 0;
+  updateCapacityForCurrentAngle();
+  setPhysicsStatus(simulationState.fillLevel <= 0 ? "empty" : "ready");
+  updateCalibrationUi();
+  setMotionMessage("Calibrated. Tilt sideways until the surface reaches a rim.", "success");
+  setTextContent(elements.liveStatus, "Side tilt calibrated and ready.");
+  renderLiquidGeometry(true);
+  renderInterface();
+  renderDiagnostics();
+  startAnimationLoop();
 }
 
-function stopDrinkingSound() {
-  setAudioGain(audioState.drinkingGain, "drinkingTarget", 0, 0.035);
-}
-
-function handleEmptyGlass() {
-  const wasAlreadyEmpty = motionState.simulationStatus === "empty" && state.level === 0;
-  state.level = 0;
-  motionState.isRefilling = false;
-  setSimulationStatus("empty");
-  stopDrinkingSound();
-  setMotionMessage("Empty — tap Refill", "warning");
-
-  if (state.diagnosticsOpen) {
-    renderMotionDiagnostics();
-    motionState.lastDiagnosticsFrame = currentFrameTime();
-  }
-
-  if (!wasAlreadyEmpty && state.drinkKey) {
-    playAudioCue("empty");
-    elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} is empty. Tap Refill.`;
-  }
-}
-
-function startAnimationLoop() {
-  if (!state.drinkKey || motionState.animationFrameId !== null) return;
-  motionState.lastFrameTime = null;
-  motionState.animationFrameId = window.requestAnimationFrame(animateSimulation);
-}
-
-function animateSimulation(timestamp) {
-  motionState.animationFrameId = null;
-
-  if (!state.drinkKey) {
-    motionState.lastFrameTime = null;
+function beginCalibration() {
+  if (!sensorState.listenerRegistered) {
+    setMotionMessage("Enable Motion before calibrating.", "warning");
     return;
   }
 
-  const elapsed = motionState.lastFrameTime === null
-    ? 1 / 60
-    : (timestamp - motionState.lastFrameTime) / 1000;
-  const deltaTime = clamp(elapsed, 0, 0.05);
-  motionState.lastFrameTime = timestamp;
-
-  updateCalculatedAngles();
-
-  const smoothing = prefersReducedMotion
-    ? 1
-    : 1 - Math.exp(-SMOOTHING_RESPONSE * deltaTime);
-  motionState.smoothedMouth += (
-    motionState.calculatedMouth - motionState.smoothedMouth
-  ) * smoothing;
-  motionState.smoothedSide += (
-    motionState.calculatedSide - motionState.smoothedSide
-  ) * smoothing;
-
-  if (motionState.isRefilling) {
-    state.level = clamp(state.level + REFILL_RATE * deltaTime, 0, 1);
-
-    if (state.level >= 1) {
-      state.level = 1;
-      motionState.isRefilling = false;
-      setSimulationStatus("ready");
-      setMotionMessage(
-        motionState.calibrated
-          ? "Refilled. Tilt the top edge toward your mouth to drink."
-          : "Refilled. Manual controls are ready; calibrate motion when available.",
-        "success"
-      );
-      elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} refilled to 100 percent.`;
-    }
-  } else if (
-    motionState.inputMode === "motion"
-    && motionState.calibrated
-    && state.level > 0
-  ) {
-    const isDrinking = motionState.calculatedMouth > DRINK_THRESHOLD_DEGREES;
-
-    if (isDrinking) {
-      const intensity = clamp(
-        (motionState.calculatedMouth - DRINK_THRESHOLD_DEGREES)
-          / (MAX_MOUTH_DEGREES - DRINK_THRESHOLD_DEGREES),
-        0,
-        1
-      );
-      const drinkRate = MIN_DRINK_RATE + (MAX_DRINK_RATE - MIN_DRINK_RATE) * intensity;
-      state.level = clamp(state.level - drinkRate * deltaTime, 0, 1);
-
-      if (motionState.simulationStatus !== "drinking") {
-        setSimulationStatus("drinking");
-        setMotionMessage("Drinking… Straighten your phone to stop.", "success");
-      }
-    } else if (motionState.simulationStatus === "drinking") {
-      setSimulationStatus("ready");
-      stopDrinkingSound();
-      setMotionMessage("Ready. Tilt the top edge toward your mouth to drink.", "success");
-    }
+  if (sensorState.calibrationTimerId !== null) {
+    window.clearTimeout(sensorState.calibrationTimerId);
   }
 
-  if (
-    state.level <= 0
-    && motionState.simulationStatus !== "calibrating"
-    && motionState.simulationStatus !== "empty"
-  ) {
-    handleEmptyGlass();
-  }
-
-  renderLiquid(false);
-  if (state.diagnosticsOpen && timestamp - motionState.lastDiagnosticsFrame >= 100) {
-    renderMotionDiagnostics();
-    motionState.lastDiagnosticsFrame = timestamp;
-  }
-
-  if (
-    motionState.isRefilling
-    || (
-      motionState.inputMode === "motion"
-      && motionState.calibrated
-      && motionState.simulationStatus !== "empty"
-    )
-  ) {
-    motionState.animationFrameId = window.requestAnimationFrame(animateSimulation);
-  } else {
-    motionState.lastFrameTime = null;
-  }
-}
-
-function renderMotionDiagnostics() {
-  setTextContent(elements.protocolValue, motionState.protocol);
-  setTextContent(elements.apiValue, motionState.apiAvailable ? "available" : "unavailable");
-  setTextContent(elements.permissionValue, motionState.permission);
-  elements.permissionValue.dataset.status = motionState.permission;
-  setTextContent(elements.betaValue, formatAngle(motionState.beta));
-  setTextContent(elements.gammaValue, formatAngle(motionState.gamma));
-  setTextContent(elements.lastEventValue, formatEventTime(motionState.lastEvent));
-  setTextContent(elements.eventCountValue, String(motionState.eventCount));
-  setTextContent(elements.betaBaseValue, formatAngle(motionState.betaBase));
-  setTextContent(elements.gammaBaseValue, formatAngle(motionState.gammaBase));
-  setTextContent(elements.calculatedMouthValue, formatAngle(motionState.calculatedMouth));
-  setTextContent(elements.calculatedSideValue, formatAngle(motionState.calculatedSide));
-  setTextContent(elements.currentLevelValue, state.level.toFixed(3));
-  setTextContent(elements.simulationStateValue, motionState.simulationStatus);
-  setAttributeValue(
-    elements.enableMotionButton,
-    "aria-pressed",
-    String(motionState.listenerRegistered)
+  sensorState.calibrated = false;
+  sensorState.calibrating = true;
+  sensorState.calibrationSamples = [];
+  sensorState.rawSideTilt = 0;
+  sensorState.filteredSideTilt = 0;
+  sensorState.clampedSideTilt = 0;
+  updateCalibrationUi();
+  setMotionMessage("Calibrating… Keep your phone upright and still.", "neutral");
+  renderDiagnostics();
+  sensorState.calibrationTimerId = window.setTimeout(
+    finishCalibration,
+    CALIBRATION_DURATION_MS
   );
 }
 
 function handleDeviceOrientation(event) {
   if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
 
-  motionState.beta = event.beta;
-  motionState.gamma = event.gamma;
-  motionState.lastEvent = new Date();
-  motionState.eventCount += 1;
+  sensorState.beta = event.beta;
+  sensorState.gamma = event.gamma;
+  sensorState.lastEvent = new Date();
+  sensorState.eventCount += 1;
 
-  if (motionState.simulationStatus === "calibrating") {
-    motionState.calibrationSamples.push({ beta: event.beta, gamma: event.gamma });
+  if (sensorState.calibrating) sensorState.calibrationSamples.push(event.gamma);
+  if (sensorState.calibrated) {
+    sensorState.rawSideTilt = normalizeAngleDifference(event.gamma, sensorState.gammaBase);
+    startAnimationLoop();
   }
 
-  if (motionState.timeoutId !== null) {
-    window.clearTimeout(motionState.timeoutId);
-    motionState.timeoutId = null;
+  if (sensorState.timeoutId !== null) {
+    window.clearTimeout(sensorState.timeoutId);
+    sensorState.timeoutId = null;
   }
 
-  if (motionState.eventCount === 1 && motionState.simulationStatus !== "calibrating") {
+  if (sensorState.eventCount === 1 && !sensorState.calibrating) {
     setMotionMessage("Motion data received. Hold your phone upright and tap Calibrate.", "success");
   }
 
-  updateCalculatedAngles();
   const timestamp = currentFrameTime();
-  if (state.diagnosticsOpen && timestamp - motionState.lastDiagnosticsFrame >= 100) {
-    renderMotionDiagnostics();
-    motionState.lastDiagnosticsFrame = timestamp;
+  if (
+    simulationState.diagnosticsOpen
+    && timestamp - simulationState.lastDiagnosticsFrame >= DIAGNOSTIC_INTERVAL_MS
+  ) {
+    renderDiagnostics();
+    simulationState.lastDiagnosticsFrame = timestamp;
   }
-}
-
-function finishCalibration() {
-  motionState.calibrationTimerId = null;
-  const samples = motionState.calibrationSamples;
-  motionState.calibrationSamples = [];
-
-  if (samples.length < MIN_CALIBRATION_SAMPLES) {
-    motionState.calibrated = false;
-    motionState.inputMode = "manual";
-    setSimulationStatus(state.level <= 0 ? "empty" : "ready");
-    updateCalibrationUi("Not enough sensor readings. Keep the phone upright and try again.");
-    if (state.level <= 0) {
-      handleEmptyGlass();
-    } else {
-      setMotionMessage(
-        "Calibration needs more valid readings. Manual controls remain fully functional.",
-        "warning"
-      );
-    }
-    renderMotionDiagnostics();
-    return;
-  }
-
-  motionState.betaBase = circularMeanDegrees(samples.map((sample) => sample.beta));
-  motionState.gammaBase = circularMeanDegrees(samples.map((sample) => sample.gamma));
-  motionState.calibrated = true;
-  motionState.inputMode = "motion";
-  motionState.calculatedMouth = 0;
-  motionState.calculatedSide = 0;
-  motionState.smoothedMouth = 0;
-  motionState.smoothedSide = 0;
-  setSimulationStatus(state.level <= 0 ? "empty" : "ready");
-  updateCalibrationUi();
-
-  if (state.level <= 0) {
-    handleEmptyGlass();
-  } else {
-    setMotionMessage("Calibrated. Tilt the top edge toward your mouth to drink.", "success");
-    elements.liveStatus.textContent = "Motion calibrated and ready.";
-  }
-
-  renderLiquid();
-  renderMotionDiagnostics();
-  startAnimationLoop();
-}
-
-function beginCalibration() {
-  if (!motionState.listenerRegistered) {
-    setMotionMessage("Enable Motion before calibrating.", "warning");
-    return;
-  }
-
-  if (motionState.calibrationTimerId !== null) {
-    window.clearTimeout(motionState.calibrationTimerId);
-  }
-
-  motionState.calibrated = false;
-  motionState.calibrationSamples = [];
-  motionState.calculatedMouth = 0;
-  motionState.calculatedSide = 0;
-  motionState.smoothedMouth = 0;
-  motionState.smoothedSide = 0;
-  setSimulationStatus("calibrating");
-  updateCalibrationUi();
-  setMotionMessage("Calibrating… Keep your phone upright and still.", "neutral");
-  renderMotionDiagnostics();
-
-  motionState.calibrationTimerId = window.setTimeout(
-    finishCalibration,
-    CALIBRATION_DURATION_MS
-  );
 }
 
 function startSensorTimeout() {
-  if (motionState.timeoutId !== null) {
-    window.clearTimeout(motionState.timeoutId);
-  }
-
-  const startingEventCount = motionState.eventCount;
-  motionState.timeoutId = window.setTimeout(() => {
-    motionState.timeoutId = null;
-
-    if (motionState.eventCount === startingEventCount) {
+  if (sensorState.timeoutId !== null) window.clearTimeout(sensorState.timeoutId);
+  const startingEventCount = sensorState.eventCount;
+  sensorState.timeoutId = window.setTimeout(() => {
+    sensorState.timeoutId = null;
+    if (sensorState.eventCount === startingEventCount) {
       setMotionMessage(
-        "No orientation data arrived within 5 seconds. Keep using manual controls and verify HTTPS and device sensor settings.",
+        "No orientation data arrived within 5 seconds. Keep using manual controls and verify HTTPS and sensor settings.",
         "warning"
       );
     }
@@ -1022,42 +1243,76 @@ function startSensorTimeout() {
 }
 
 function registerOrientationListener() {
-  if (motionState.listenerRegistered) return;
-
+  if (sensorState.listenerRegistered) return;
   window.addEventListener("deviceorientation", handleDeviceOrientation, { passive: true });
-  motionState.listenerRegistered = true;
+  sensorState.listenerRegistered = true;
   updateCalibrationUi("Hold your phone upright and tap Calibrate");
   setMotionMessage("Motion enabled. Hold your phone upright, then tap Calibrate.", "neutral");
   startSensorTimeout();
 }
 
-function diagnosticsText() {
-  const soundStatus = audioState.unavailable
-    ? "unavailable"
-    : audioState.muted
-      ? "muted"
-      : audioState.interacted
-        ? "on"
-        : "not-started";
+// Diagnostics and interface events
+function renderDiagnostics() {
+  setTextContent(elements.protocolValue, sensorState.protocol);
+  setTextContent(elements.apiValue, sensorState.apiAvailable ? "available" : "unavailable");
+  setTextContent(elements.permissionValue, sensorState.permission);
+  elements.permissionValue.dataset.status = sensorState.permission;
+  setTextContent(elements.betaValue, formatAngle(sensorState.beta));
+  setTextContent(elements.gammaValue, formatAngle(sensorState.gamma));
+  setTextContent(elements.gammaBaseValue, formatAngle(sensorState.gammaBase));
+  setTextContent(elements.lastEventValue, formatEventTime(sensorState.lastEvent));
+  setTextContent(elements.eventCountValue, String(sensorState.eventCount));
+  setTextContent(elements.sideTiltRawValue, formatAngle(sensorState.rawSideTilt));
+  setTextContent(elements.sideTiltFilteredValue, formatAngle(sensorState.filteredSideTilt));
+  setTextContent(elements.sideTiltClampedValue, formatAngle(sensorState.clampedSideTilt));
+  setTextContent(elements.currentFillValue, simulationState.fillLevel.toFixed(3));
+  setTextContent(elements.capacityValue, simulationState.capacityFraction.toFixed(3));
+  setTextContent(elements.overflowValue, simulationState.overflowAmount.toFixed(3));
+  setTextContent(elements.flowRateValue, `${simulationState.flowRate.toFixed(3)}/s`);
+  setTextContent(elements.lowerLipValue, simulationState.lowerLip);
+  setTextContent(elements.physicsStateValue, simulationState.physicsStatus);
+  setTextContent(elements.audioStateValue, audioDiagnosticState());
+  setTextContent(elements.appVersionValue, APP_VERSION);
+  setAttributeValue(
+    elements.enableMotionButton,
+    "aria-pressed",
+    String(sensorState.listenerRegistered)
+  );
+}
 
+function setDiagnostics(open) {
+  simulationState.diagnosticsOpen = open;
+  elements.diagnosticPanel.hidden = !open;
+  setAttributeValue(elements.controlsButton, "aria-expanded", String(open));
+  elements.drinkScreen.classList.toggle("controls-open", open);
+  if (open) {
+    renderDiagnostics();
+    simulationState.lastDiagnosticsFrame = currentFrameTime();
+  }
+}
+
+function diagnosticsText() {
   return [
-    "TiltSip motion diagnostics",
-    `Version: ${VERSION}`,
-    `Protocol: ${motionState.protocol}`,
-    `API: ${motionState.apiAvailable ? "available" : "unavailable"}`,
-    `Permission: ${motionState.permission}`,
-    `Beta: ${formatAngle(motionState.beta)}`,
-    `Gamma: ${formatAngle(motionState.gamma)}`,
-    `Last event: ${formatEventTime(motionState.lastEvent)}`,
-    `Events received: ${motionState.eventCount}`,
-    `Beta base: ${formatAngle(motionState.betaBase)}`,
-    `Gamma base: ${formatAngle(motionState.gammaBase)}`,
-    `Tilt to mouth: ${formatAngle(motionState.calculatedMouth)}`,
-    `Side tilt: ${formatAngle(motionState.calculatedSide)}`,
-    `Current level: ${state.level.toFixed(3)}`,
-    `State: ${motionState.simulationStatus}`,
-    `Invert drinking direction: ${motionState.invertDirection ? "yes" : "no"}`,
-    `Sound: ${soundStatus}`
+    "TiltSip side-tilt diagnostics",
+    `App version: ${APP_VERSION}`,
+    `Protocol: ${sensorState.protocol}`,
+    `API: ${sensorState.apiAvailable ? "available" : "unavailable"}`,
+    `Permission: ${sensorState.permission}`,
+    `Beta raw: ${formatAngle(sensorState.beta)}`,
+    `Gamma raw: ${formatAngle(sensorState.gamma)}`,
+    `Gamma base: ${formatAngle(sensorState.gammaBase)}`,
+    `Last event: ${formatEventTime(sensorState.lastEvent)}`,
+    `Events received: ${sensorState.eventCount}`,
+    `Side tilt raw: ${formatAngle(sensorState.rawSideTilt)}`,
+    `Side tilt filtered: ${formatAngle(sensorState.filteredSideTilt)}`,
+    `Side tilt clamped: ${formatAngle(sensorState.clampedSideTilt)}`,
+    `Current fill: ${simulationState.fillLevel.toFixed(3)}`,
+    `Capacity at current angle: ${simulationState.capacityFraction.toFixed(3)}`,
+    `Overflow amount: ${simulationState.overflowAmount.toFixed(3)}`,
+    `Flow rate: ${simulationState.flowRate.toFixed(3)}/s`,
+    `Lower lip: ${simulationState.lowerLip}`,
+    `Physics state: ${simulationState.physicsStatus}`,
+    `Audio state: ${audioDiagnosticState()}`
   ].join("\n");
 }
 
@@ -1069,102 +1324,59 @@ function fallbackCopy(text) {
   textArea.style.opacity = "0";
   document.body.appendChild(textArea);
   textArea.select();
-
   const copied = document.execCommand("copy");
   textArea.remove();
-
   if (!copied) throw new Error("Copy command was rejected.");
 }
 
 async function copyDiagnostics() {
   try {
     const text = diagnosticsText();
-
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
       await navigator.clipboard.writeText(text);
     } else {
       fallbackCopy(text);
     }
-
-    elements.copyDiagnosticsButton.textContent = "Copied";
-    elements.liveStatus.textContent = "Motion diagnostics copied.";
+    setTextContent(elements.copyDiagnosticsButton, "Copied");
+    setTextContent(elements.liveStatus, "Diagnostics copied.");
   } catch {
-    elements.copyDiagnosticsButton.textContent = "Copy failed";
-    elements.liveStatus.textContent = "Motion diagnostics could not be copied automatically.";
-    setMotionMessage("Copy failed. You can still read every diagnostic value in this panel.", "warning");
+    setTextContent(elements.copyDiagnosticsButton, "Copy failed");
+    setTextContent(elements.liveStatus, "Diagnostics could not be copied automatically.");
+    setMotionMessage("Copy failed. Every diagnostic value remains visible in this panel.", "warning");
   }
-}
-
-function activateManualMode() {
-  motionState.inputMode = "manual";
-  motionState.isRefilling = false;
-
-  if (state.level <= 0) {
-    handleEmptyGlass();
-  } else {
-    setSimulationStatus("ready");
-    setMotionMessage(
-      motionState.calibrated
-        ? "Manual controls are active. Tap Recalibrate to return to motion."
-        : "Manual controls are active and fully functional.",
-      "neutral"
-    );
-  }
-
-  renderMotionDiagnostics();
 }
 
 function bindEvents() {
   elements.drinkCards.forEach((card) => {
     card.addEventListener("click", () => selectDrink(card.dataset.drink));
   });
-
   elements.backButton.addEventListener("click", returnToChooser);
-  elements.refillButtons.forEach((button) => {
-    button.addEventListener("click", refillGlass);
-  });
+  elements.refillButtons.forEach((button) => button.addEventListener("click", refillGlass));
   elements.soundButton.addEventListener("click", toggleMute);
-  elements.controlsButton.addEventListener("click", () => setDiagnostics(!state.diagnosticsOpen));
+  elements.controlsButton.addEventListener("click", () => {
+    setDiagnostics(!simulationState.diagnosticsOpen);
+  });
   elements.copyDiagnosticsButton.addEventListener("click", () => {
     void copyDiagnostics();
   });
   elements.calibrateButton.addEventListener("click", beginCalibration);
-  elements.invertDirectionControl.addEventListener("change", (event) => {
-    motionState.invertDirection = event.currentTarget.checked;
-    motionState.calculatedMouth = 0;
-    motionState.smoothedMouth = 0;
-
-    if (motionState.calibrated) {
-      if (state.level <= 0) {
-        handleEmptyGlass();
-      } else {
-        setSimulationStatus("ready");
-        setMotionMessage(
-          "Drinking direction inverted. Keep the phone upright or recalibrate if needed.",
-          "neutral"
-        );
-      }
-    }
-
-    renderMotionDiagnostics();
-  });
 
   elements.fillControl.addEventListener("input", (event) => {
-    state.level = clamp(readNumber(event.currentTarget) / 100, 0, 1);
     activateManualMode();
-    renderLiquid();
+    simulationState.isRefilling = false;
+    simulationState.fillLevel = clamp(readNumber(event.currentTarget) / 100, 0, 1);
+    simulationState.flowRate = 0;
+    updateCapacityForCurrentAngle();
+    if (simulationState.fillLevel <= 0) handleEmptyGlass();
+    else setPhysicsStatus("ready");
+    renderLiquidGeometry(true);
+    renderInterface();
+    renderDiagnostics();
+    startAnimationLoop();
   });
 
   elements.sideTiltControl.addEventListener("input", (event) => {
-    state.sideTilt = readNumber(event.currentTarget);
-    activateManualMode();
-    renderLiquid();
-  });
-
-  elements.mouthTiltControl.addEventListener("input", (event) => {
-    state.mouthTilt = readNumber(event.currentTarget);
-    activateManualMode();
-    renderLiquid();
+    setManualSideTilt(readNumber(event.currentTarget));
   });
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -1176,80 +1388,78 @@ function bindEvents() {
       const permissionPromise = (
         typeof OrientationEvent !== "undefined"
         && OrientationEvent !== null
-        && !motionState.listenerRegistered
+        && !sensorState.listenerRegistered
         && typeof OrientationEvent.requestPermission === "function"
       )
         ? OrientationEvent.requestPermission()
         : null;
 
-      // Audio creation and resume stay inside the same direct user gesture.
+      // Audio is created or resumed inside this same direct click.
       enableAudioFromUserGesture();
 
       if (typeof OrientationEvent === "undefined" || OrientationEvent === null) {
-        motionState.apiAvailable = false;
-        motionState.permission = "not-required";
+        sensorState.apiAvailable = false;
+        sensorState.permission = "not-required";
         setMotionMessage(
-          "Orientation is unavailable on this device or browser. Manual controls remain fully functional.",
+          "Orientation is unavailable. Manual fill and side tilt remain fully functional.",
           "warning"
         );
-        renderMotionDiagnostics();
+        renderDiagnostics();
         return;
       }
 
-      motionState.apiAvailable = true;
-
-      if (motionState.listenerRegistered) {
+      sensorState.apiAvailable = true;
+      if (sensorState.listenerRegistered) {
         setMotionMessage(
-          motionState.calibrated
-            ? "Motion is enabled and calibrated. Tap Recalibrate whenever the upright position changes."
+          sensorState.calibrated
+            ? "Motion is enabled and calibrated. Recalibrate if the upright position changes."
             : "Motion is enabled. Hold your phone upright and tap Calibrate.",
-          motionState.eventCount > 0 ? "success" : "warning"
+          sensorState.eventCount > 0 ? "success" : "warning"
         );
         updateCalibrationUi();
-        renderMotionDiagnostics();
+        renderDiagnostics();
         return;
       }
 
       if (permissionPromise) {
         const permissionResult = await permissionPromise;
-
         if (permissionResult !== "granted") {
-          motionState.permission = "denied";
+          sensorState.permission = "denied";
           setMotionMessage(
-            "Motion permission was denied. You can continue with every manual control or change the site permission and try again.",
+            "Motion permission was denied. Manual fill and side tilt remain fully functional.",
             "warning"
           );
-          renderMotionDiagnostics();
+          renderDiagnostics();
           return;
         }
-
-        motionState.permission = "granted";
+        sensorState.permission = "granted";
         registerOrientationListener();
-        renderMotionDiagnostics();
+        renderDiagnostics();
         return;
       }
 
-      motionState.permission = "not-required";
+      sensorState.permission = "not-required";
       registerOrientationListener();
-      renderMotionDiagnostics();
+      renderDiagnostics();
     } catch {
-      motionState.permission = "error";
+      sensorState.permission = "error";
       setMotionMessage(
-        "Motion could not be enabled. Manual controls remain fully functional; verify HTTPS and the site sensor permission.",
+        "Motion could not be enabled. Manual controls remain functional; verify HTTPS and sensor permission.",
         "error"
       );
-      renderMotionDiagnostics();
+      renderDiagnostics();
     }
   });
 }
 
 function initialize() {
-  motionState.protocol = window.location.protocol === "https:" ? "HTTPS" : "Not HTTPS";
-  motionState.apiAvailable = typeof window.DeviceOrientationEvent !== "undefined"
+  sensorState.protocol = window.location.protocol === "https:" ? "HTTPS" : "Not HTTPS";
+  sensorState.apiAvailable = typeof window.DeviceOrientationEvent !== "undefined"
     && window.DeviceOrientationEvent !== null;
-  elements.versionLabel.textContent = `v${VERSION}`;
+  setTextContent(elements.versionLabel, `v${APP_VERSION}`);
+  setTextContent(elements.appVersionValue, APP_VERSION);
   updateSoundButton();
-  renderMotionDiagnostics();
+  renderDiagnostics();
   bindEvents();
 }
 
