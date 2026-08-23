@@ -1,24 +1,54 @@
-# TiltSip 1.0.0 — versión auditada
+# TiltSip 2.0.0-rc.1
 
-TiltSip es una experiencia web móvil original que simula beber de un vaso. La versión 1.0.0 reúne la selección Beer/Cola, el modo manual, el permiso y diagnóstico de orientación, la calibración, el consumo por inclinación, el acabado visual y los sonidos originales generados en el navegador.
+TiltSip es una simulación web móvil original de un vaso que se inclina y derrama.
+Beer y Cola comparten un motor geométrico 2D: el líquido conserva su área, la
+superficie permanece perpendicular a la gravedad y el flujo comienza únicamente
+cuando el volumen supera la capacidad retenible del ángulo actual.
 
-La experiencia principal está optimizada para un teléfono en orientación vertical. El modo manual sigue funcionando en computador y cuando el sensor no existe, el permiso se niega o no llegan datos.
+Esta entrega es una **release candidate**, no la versión 2.0.0 final. La física,
+la interfaz, el renderer y la máquina de estados de audio tienen pruebas
+determinísticas. Siguen pendientes la validación en iPhone/Android físicos y las
+muestras humanas originales o redistribuibles exigidas para certificar el audio
+final.
 
-## Archivos
+## Tecnología y archivos
+
+La aplicación de producción usa solo HTML, CSS y JavaScript moderno. No tiene
+frameworks, backend, npm en producción ni recursos remotos.
 
 ```text
 tilt-sip/
 ├── index.html
 ├── styles.css
 ├── app.js
-└── README.md
+├── config.js
+├── physics.js
+├── README.md
+├── assets/
+│   └── audio/
+│       └── README.md             # inventario, procedencia y limitación actual
+├── test-evidence/
+│   └── acceptance/
+│       ├── beer-acceptance.svg
+│       ├── beer-acceptance.png
+│       ├── cola-acceptance.svg
+│       └── cola-acceptance.png
+└── tests/
+    ├── physics.test.mjs
+    ├── app.test.mjs
+    ├── static.test.mjs
+    └── visual-matrix.mjs
 ```
 
-Solo usa HTML, CSS y JavaScript puro. No contiene imágenes, sonidos descargados, librerías ni dependencias externas. Las rutas `./styles.css` y `./app.js` son relativas para funcionar bajo `/tilt-sip/` en GitHub Pages.
+Las rutas de producción son relativas (`./styles.css`, `./app.js`,
+`./config.js` y `./physics.js`). Por eso la aplicación funciona publicada bajo
+`/tilt-sip/` en GitHub Pages. `tests/` y `test-evidence/` no se cargan desde
+`index.html`.
 
-## Cómo abrirlo en un computador
+## Abrirlo en un computador
 
-Puede abrir `index.html` directamente. Para probarlo mediante un servidor local, abra una terminal en la carpeta `tilt-sip` y ejecute:
+Como `app.js` usa módulos ES, la forma fiable de probar el proyecto es servir la
+carpeta localmente:
 
 ```bash
 python3 -m http.server 8000
@@ -30,155 +60,303 @@ En Windows también puede usar:
 py -m http.server 8000
 ```
 
-Después visite `http://localhost:8000`. Los sensores pueden no entregar datos sobre HTTP, pero Beer, Cola, Refill, sonido y los controles manuales no dependen del sensor.
+Abra `http://localhost:8000/`. El modo manual funciona en localhost. Los sensores
+de un teléfono deben probarse desde la URL HTTPS de GitHub Pages.
 
-## Comportamiento conservado
+## Mapeo angular: sensor ±78° → física ±90°
 
-- Permiso de `DeviceOrientationEvent` solicitado solamente desde el click de **Enable Motion**.
-- Listener registrado únicamente después de `granted` cuando el navegador exige permiso.
-- Eventos con beta o gamma inválidos ignorados.
-- Aviso después de cinco segundos sin datos y modo manual siempre disponible.
-- Calibración de varias lecturas durante aproximadamente 550 ms.
-- Diferencias angulares normalizadas y limitadas.
-- Beta controla la inclinación hacia la boca; gamma inclina visualmente la superficie.
-- Suavizado y consumo procesados con `requestAnimationFrame` y `deltaTime`.
-- Umbral de 18° y vaciado profundo de aproximadamente cinco segundos desde 100 %.
-- Nivel limitado entre `0` y `1`, espuma unida a la superficie y mensaje **Empty — tap Refill**.
-- **Invert drinking direction**, diagnóstico copiable y cambio funcional entre Beer y Cola.
-
-## Acabado visual
-
-El objeto central `DRINKS` continúa controlando los efectos sin duplicar la simulación:
-
-- **Beer:** ámbar semitransparente, reflejo cálido, espuma blanca más alta e irregular y 18 burbujas finas de movimiento tranquilo.
-- **Cola:** marrón casi negro, brillo rojizo, espuma beige más delgada y 22 burbujas pequeñas más rápidas.
-- Las burbujas se crean con elementos HTML y CSS, quedan recortadas dentro del líquido y desaparecen al superar la superficie o cuando el vaso está vacío.
-- La espuma disminuye ligeramente con el nivel.
-- Cada pulsación de **Refill** recrea burbujas y espuma con una distribución nueva.
-- El vidrio incorpora reflejos laterales y diagonales sutiles.
-- Si el sistema tiene `prefers-reduced-motion: reduce`, las burbujas quedan estáticas, las transiciones se reducen y Refill se completa sin animación prolongada.
-
-El máximo es de 22 burbujas animadas, lo que limita el trabajo gráfico en teléfonos.
-
-## Sonido original con Web Audio API
-
-No existen archivos de audio. TiltSip genera ruido y tonos directamente mediante Web Audio API:
-
-- gas suave cuando queda suficiente bebida y el estado es `ready`;
-- ruido filtrado de sorbo o vertido durante `drinking`;
-- tono corto descendente al quedar vacío;
-- tono corto ascendente al pulsar Refill;
-- botón visible **Mute/Unmute**.
-
-El `AudioContext` se crea o reanuda directamente desde **Enable Motion**. Antes de esa interacción no se crea el motor de audio ni se reproduce sonido. Si la página pasa a segundo plano, el contexto se suspende y las burbujas se pausan; al regresar puede reanudarse únicamente si ya hubo una interacción y el sonido no está silenciado.
-
-El sonido es complementario: si Web Audio no está disponible o falla, los sensores y controles manuales siguen funcionando.
-
-## Interfaz y diagnóstico
-
-Enable Motion, Refill, Mute y Diagnostics están agrupados en la parte inferior para poder alcanzarlos con el pulgar. También se conserva el Refill superior.
-
-El panel de diagnóstico permanece oculto por defecto. Ábralo con **Diagnostics** o añada `?debug=1` a la dirección:
+La lectura accesible y el ángulo interno son variables distintas:
 
 ```text
-http://localhost:8000/?debug=1
+rawSideTilt       = gamma relativa a la calibración
+clampedSideTilt   = clamp(rawSideTilt filtrada, -78, +78)
+normalizedTilt    = clamp(clampedSideTilt / 78, -1, 1)
+physicsAngle      = normalizedTilt × 90°
+physicsRadians    = normalizedTilt × π/2
 ```
 
-Muestra protocolo, API, permiso, beta, gamma, hora y cantidad de eventos, referencias base, inclinaciones calculadas, nivel, estado, dirección invertida y versión `1.0.0`. **Copy diagnostics** también incluye el estado del sonido.
+Ejemplos:
 
-## Prueba exacta en computador
+| Lectura visible | Normalizada | Ángulo físico |
+|---:|---:|---:|
+| 0° | 0 | 0° |
+| 39° | 0.5 | 45° |
+| 65° | 0.8333 | 75° |
+| 78° | 1 | 90° |
+| -78° | -1 | -90° |
 
-1. Abra `http://localhost:8000` y confirme que el panel diagnóstico esté oculto.
-2. Elija Beer. Confirme líquido ámbar transparente, espuma blanca irregular y burbujas finas.
-3. Vuelva y elija Cola. Confirme líquido casi negro con reflejo rojo, espuma beige más delgada y burbujas más rápidas.
-4. Pulse **Enable Motion**. Aunque el computador no tenga datos de orientación, debe comenzar el audio y el modo manual debe continuar disponible.
-5. Pulse **Mute** y **Unmute**; el sonido debe apagarse y regresar sin afectar el vaso.
-6. Abra **Diagnostics** y mueva Fill level, Side tilt y Tilt to mouth.
-7. Lleve Fill level a cero. Confirme que desaparecen líquido, espuma y burbujas, aparece `empty` y suena una señal corta si el audio está activo.
-8. Pulse el Refill inferior. Confirme llenado hasta `1.000`, señal corta y una distribución nueva de espuma y burbujas.
-9. Cambie entre Beer y Cola y repita Refill.
-10. Pulse **Copy diagnostics** y revise que muestre versión `1.0.0` y estado del sonido.
-11. Cambie el sistema a “reducir movimiento”, recargue la página y confirme burbujas estáticas y Refill inmediato.
-12. Abra la consola y confirme que no aparecen errores.
+El slider y el sensor se limitan a ±78°. La gravedad, `capacityFraction`, el
+polígono renderizado y el caudal usan `physicsAngle`. La interfaz nunca presenta
+90° como lectura real; Diagnostics lo muestra únicamente bajo **Physics angle**.
 
-## Prueba exacta en iPhone con Safari
+Al superar aproximadamente 77.5° se satura a 78°. La salida del máximo tiene un
+umbral inferior, evitando parpadeo cuando el sensor oscila cerca del límite. De
+esta forma no es necesario alcanzar 80° o 90° físicamente y ±78° puede vaciar el
+vaso por completo.
 
-1. Publique el proyecto en GitHub Pages y abra la URL `https://...` directamente en Safari, con el iPhone vertical.
-2. Elija Beer y pulse **Enable Motion**. Acepte el permiso de movimiento.
-3. Confirme que el diagnóstico no se abre automáticamente y que el sonido suave comienza solamente después del click.
-4. Mantenga el iPhone vertical y quieto; pulse **Calibrate** y espere `calibrating → ready`.
-5. Déjelo vertical varios segundos: el nivel no debe bajar.
-6. Incline solo a izquierda y derecha: la superficie debe responder sin consumir.
-7. Acerque el borde superior hacia la boca: debe aparecer `drinking`, sonar el vertido y bajar el nivel.
-8. Enderece el iPhone: el consumo y el sonido de vertido deben detenerse inmediatamente.
-9. Mantenga una inclinación profunda desde 100 %: debe vaciarse aproximadamente en 4–7 segundos.
-10. Confirme el tono final, `empty` y **Empty — tap Refill**.
-11. Pulse Refill: confirme tono corto, llenado al 100 % y espuma nueva.
-12. Pruebe Mute/Unmute durante `ready` y `drinking`.
-13. Envíe Safari al segundo plano: el sonido debe detenerse. Regrese y confirme que no hubo reproducción mientras estaba oculto.
-14. Cambie a Cola y repita calibración, inclinación lateral, consumo, vacío y Refill.
-15. Si el signo es contrario, active **Invert drinking direction**.
-16. Repita negando el permiso: debe aparecer el mensaje útil y el modo manual debe seguir completamente funcional.
+## Motor geométrico
 
-## Prueba exacta en Android con Chrome
+Cada vaso configura un polígono convexo interior `P`, `rimLeft`, `rimRight` y una
+geometría exterior. El asa de Beer queda detrás y fuera de `P`, por lo que nunca
+puede contener líquido.
 
-1. Abra la URL HTTPS de GitHub Pages directamente en Chrome, con el teléfono vertical.
-2. Elija Cola y pulse **Enable Motion**. Acepte el permiso si aparece; si no se necesita, confirme `not-required`.
-3. Confirme que no había sonido antes del click y que el panel diagnóstico sigue cerrado.
-4. Calibre con el teléfono vertical y quieto hasta obtener `ready` y referencias base.
-5. Compruebe que la vertical no consume y que la inclinación exclusivamente lateral solo mueve la superficie.
-6. Incline el borde superior hacia la boca: deben activarse `drinking`, el sonido de vertido y el consumo gradual.
-7. Enderece el teléfono y confirme la detención inmediata del consumo y del sonido.
-8. Compruebe un vaciado profundo en aproximadamente 4–7 segundos, la señal de vacío y el mensaje final.
-9. Pulse Refill y confirme espuma/burbujas nuevas, señal corta y nivel `1.000`.
-10. Pruebe Mute/Unmute, segundo plano y regreso a la página.
-11. Cambie entre Beer y Cola y confirme sus diferencias visuales.
-12. Pruebe **Invert drinking direction** si fuera necesario.
-13. Bloquee el sensor o espere sin datos: después de cinco segundos debe aparecer el aviso y el modo manual debe continuar funcionando.
-14. Abra Diagnostics, copie el diagnóstico y revise nivel, estado, referencias, sonido y versión.
+Para el ángulo físico `theta`:
 
-No se usan magnetómetro, orientación absoluta, geolocalización, cámara ni micrófono. La aplicación no recopila ni envía datos.
+```text
+g = (sin(theta), cos(theta))
+q(p) = dot(p, g)
+liquidPolygon = P ∩ { p | q(p) >= h }
+```
 
-## Auditoría final 1.0.0
+El motor encuentra `h` por búsqueda binaria hasta que el área del polígono
+coincide con `fillLevel × area(P)`. Usa shoelace para el área y clipping de
+semiplano para la intersección. No rota un rectángulo, no usa `tan(theta)` y no
+crea huecos triangulares artificiales.
 
-La auditoría de código se completó sin añadir funciones. Las correcciones se limitaron a problemas verificables:
+La capacidad retenible se calcula con el borde inferior:
 
-- el panel diagnóstico deja de modificar el DOM con cada evento del sensor cuando está oculto y se limita aproximadamente a 10 actualizaciones por segundo cuando está visible;
-- las variables CSS, textos, valores de controles y atributos no se vuelven a escribir cuando su valor no cambió;
-- el diagnóstico actualiza inmediatamente el estado `empty`, incluso si el último fotograma cae entre dos intervalos del panel;
-- las medidas con `dvh` tienen respaldo con `vh` para navegadores que no entienden unidades dinámicas;
-- el mensaje de movimiento se anuncia como estado y el botón Calibrate queda relacionado con su instrucción;
-- se retiraron referencias internas y parámetros de error que no se utilizaban.
+```text
+lipThreshold = max(dot(rimLeft, g), dot(rimRight, g))
+capacityPolygon = P ∩ { p | dot(p, g) >= lipThreshold }
+capacityFraction = area(capacityPolygon) / area(P)
+```
 
-Se comprobaron sintaxis, estructura HTML, rutas relativas, ausencia de recursos externos y credenciales, recorte del vaso, configuración compartida de Beer/Cola, permiso directo desde click, escenarios `granted`, `denied`, `not-required`, `error` y API ausente, valores inválidos, espera de cinco segundos sin eventos, listener único, calibración con múltiples muestras, normalización, suavizado, `requestAnimationFrame`, `deltaTime`, dirección invertida, inclinación lateral sin consumo, detención al enderezar, vaciado profundo, Refill, copia de diagnóstico, modo manual, mute, suspensión en segundo plano y reducción de movimiento. El conjunto automatizado contiene 136 comprobaciones y no produjo errores sin capturar.
+Solo existe flujo si el nivel supera `capacityFraction + epsilon`. La integración
+usa `requestAnimationFrame`, `deltaTime` limitado y una histéresis pequeña. Un
+ángulo fijo derrama hasta su capacidad y se detiene; inclinar más vuelve a iniciar
+el flujo. El nivel nunca sale de `[0, 1]`.
 
-## Lista final de pruebas antes de publicar
+## Renderer visual
 
-### Completadas en la auditoría de código
+La física es la única fuente de la forma. El mismo polígono actualiza el líquido,
+su clip y la superficie; las capas de material solo cambian su apariencia:
 
-- [x] `app.js` tiene sintaxis válida y no contiene referencias conocidas sin uso.
-- [x] `index.html` no tiene identificadores duplicados y todos los elementos consultados por JavaScript existen.
-- [x] `./styles.css` y `./app.js` funcionan como rutas relativas bajo `/tilt-sip/`.
-- [x] No se cargan recursos HTTP/HTTPS externos ni existen patrones de claves o secretos.
-- [x] El permiso se invoca dentro del click de Enable Motion, antes del primer `await` y sin temporizador.
-- [x] El listener se registra después de `granted`, o directamente cuando `requestPermission` no existe, y nunca se duplica.
-- [x] API ausente, permiso denegado, valores `null` o no numéricos y ausencia de eventos conservan el modo manual.
-- [x] Calibración, normalización, suavizado, límites, `requestAnimationFrame` y consumo con `deltaTime` pasan la simulación.
-- [x] Inclinación lateral aislada no consume; enderezar detiene el consumo; una inclinación profunda sostenida vacía gradualmente.
-- [x] Beer y Cola usan la misma lógica mediante `DRINKS` y respetan su configuración visual.
-- [x] Líquido, espuma y burbujas permanecen recortados dentro del vaso según la estructura y las reglas CSS.
-- [x] El audio solo se crea después de Enable Motion; mute y suspensión al ocultar la página pasan la simulación.
-- [x] El diagnóstico oculto no recibe escrituras por cada evento y el visible queda limitado aproximadamente a 10 Hz.
-- [x] Existen `100vh`/`100dvh`, `safe-area-inset`, bloqueo del desplazamiento y reglas de `prefers-reduced-motion`.
+1. base de color y transmisión;
+2. gradiente de profundidad;
+3. oscurecimiento periférico;
+4. luz interna cálida o rojiza;
+5. textura procedural fina y no repetitiva;
+6. microburbujas de tamaños, opacidades y profundidades distintas;
+7. menisco con sombra húmeda;
+8. espuma inferior húmeda, cuerpo y superficie;
+9. vidrio, borde, base, reflejos asimétricos y asa independiente;
+10. condensación estática y sombra de contacto.
 
-### Pendientes en dispositivos físicos
+Beer configura una jarra gruesa con asa, ámbar translúcido, 26 burbujas animadas,
+34 celdas de espuma y reflejo cálido. Cola configura un highball cónico, marrón
+oscuro con transmisión rojiza, 30 burbujas más rápidas y espuma beige más fina.
+Ambas bebidas comparten toda la lógica; solo cambian datos del objeto `DRINKS` y
+la geometría seleccionada.
 
-Estas pruebas no se declaran completadas porque requieren hardware real:
+Los elementos se generan al elegir bebida o usar Refill, no en cada evento del
+sensor. Cada frame solo cambia atributos geométricos indispensables. Los clips de
+cavidad y líquido contienen líquido, espuma y burbujas. `prefers-reduced-motion`
+detiene la animación repetitiva y hace Refill inmediato.
 
-- [ ] **iPhone Safari:** confirmar el cuadro de permiso del sistema, lecturas beta/gamma reales, signo de la inclinación, safe areas con notch/Dynamic Island y audio por altavoz.
-- [ ] **iPhone Safari:** confirmar que una inclinación profunda sostenida tarda entre 4 y 7 segundos con la cadencia real del dispositivo y que volver a vertical detiene el consumo.
-- [ ] **Android Chrome:** confirmar si el dispositivo informa `not-required` o solicita permiso, lecturas beta/gamma reales, dirección de consumo y audio por altavoz.
-- [ ] **Android Chrome:** confirmar safe areas, tamaño en orientación vertical, suspensión al cambiar de aplicación y vaciado en 4–7 segundos con hardware real.
-- [ ] En ambos: negar o bloquear el sensor desde los ajustes del navegador, esperar cinco segundos y verificar visualmente que todos los controles manuales siguen disponibles.
+## Capturas de aceptación
 
-La versión `1.0.0` indica que el código pasó la auditoría estática y simulada. No implica que las pruebas físicas anteriores ya se hayan realizado.
+El generador determinístico cubre por bebida:
+
+- 100 % a 0°;
+- 80 % a ±30°;
+- 60 % a ±50°;
+- 40 % a ±65°;
+- 20 % a ±72°;
+- 5 % a ±78°.
+
+Capturas incluidas:
+
+- [Beer — 11 estados](./test-evidence/acceptance/beer-acceptance.png)
+- [Cola — 11 estados](./test-evidence/acceptance/cola-acceptance.png)
+
+Los SVG equivalentes se incluyen para revisar los vectores a resolución
+independiente. Un punto verde significa que ese volumen cabe al ángulo mostrado;
+un punto ámbar significa que el estado inicial debe derramar progresivamente.
+
+Estas capturas se rasterizaron e inspeccionaron en el entorno de desarrollo. No
+sustituyen una revisión visual en Safari/Chrome móviles ni certifican por sí solas
+fotorealismo perceptual en una pantalla física.
+
+## Sensores y calibración
+
+- **Enable Motion** no solicita permiso al cargar.
+- Si `DeviceOrientationEvent` no existe, queda activo el modo manual.
+- Si `requestPermission` existe, se invoca directamente desde el click; el
+  listener solo se registra tras obtener `granted`.
+- Si el método no existe, el listener se registra directamente.
+- Eventos cuyo `beta` o `gamma` no sean números finitos se ignoran.
+- Tras cinco segundos sin datos aparece un aviso útil y el modo manual sigue
+  completo.
+- **Calibrate** toma varias lecturas de `gamma` durante unos 550 ms y obtiene una
+  media angular estable.
+- `gamma` relativa controla la inclinación lateral. `beta` es solo diagnóstico.
+- El filtrado exponencial depende de `deltaTime`; la saturación garantiza que una
+  lectura sostenida cerca del máximo llegue a 78°.
+
+Diagnostics muestra protocolo, API, permiso, beta/gamma, gamma base, eventos,
+lectura cruda, filtrada y limitada, normalización, ángulo físico, nivel,
+capacidad, overflow, caudal, borde, estado físico, estado de audio y versión.
+**Copy diagnostics** copia esos datos.
+
+## Audio: máquina de estados y limitación actual
+
+El `AudioContext` se crea o reanuda únicamente dentro del click directo de
+**Enable Motion**. No se reproduce nada antes de una interacción.
+
+Estados implementados:
+
+- `empty`: silencio;
+- `idle-bubbling`: microeventos irregulares cerca de vertical y con más de 5 %;
+- `tilted-no-flow`: silencio de consumo;
+- `sipping`: solo con `overflow > epsilon`, `flowRate > 0` y hasta el umbral de
+  consumo normal;
+- `chugging`: solo con flujo real; entra por encima de 66° y permanece hasta bajar
+  de 63°;
+- `refilling`: evento breve limitado a la animación;
+- `muted`: fuentes y timers cancelados de inmediato.
+
+Beer usa intervalos ambientales más largos y tono algo más grave. Cola programa
+grupos más frecuentes y agudos. No se usan loops, osciladores sostenidos ni ruido
+continuo. Cambiar bebida, silenciar, vaciar o pasar a segundo plano cancela los
+schedulers y AudioNodes activos.
+
+### Procedencia y licencia
+
+- **Assets visuales de producción:** ninguno. Todo el material se genera con SVG,
+  CSS y JavaScript originales del proyecto.
+- **Assets de audio binarios:** ninguno.
+- **Motor Web Audio:** código procedural original de TiltSip, sin dependencia de
+  terceros.
+- **Referencia visual adjunta:** utilizada solo para observar cualidades generales
+  del material; no se copia, distribuye ni incorpora al proyecto.
+
+La procedencia también está en [`assets/audio/README.md`](./assets/audio/README.md).
+Las muestras humanas de sipping/chugging siguen pendientes. El fallback
+procedural permite verificar estados y cancelación, pero **no se presenta como
+audio humano final ni se declara validado perceptualmente**.
+
+## Pruebas automatizadas ejecutadas
+
+Node.js solo se usa para la auditoría; no forma parte de la web publicada.
+
+```bash
+node --check app.js
+node --check config.js
+node --check physics.js
+node tests/physics.test.mjs
+node tests/app.test.mjs
+node tests/static.test.mjs
+node tests/visual-matrix.mjs test-evidence/acceptance
+```
+
+Resultado de esta release candidate:
+
+- física y geometría: **4.166 aserciones aprobadas**;
+- aplicación, sensor simulado y audio: **83 aserciones aprobadas**;
+- auditoría estática, rutas, permisos y seguridad: **150 aserciones aprobadas**;
+- capturas: **22 estados generados** — 11 Beer y 11 Cola.
+
+Las pruebas cubren mapeo 0/39/65/±78, clamp, histéresis del máximo, conservación
+de área, simetría, capacidad, vaciado independiente de FPS, listener único,
+permiso directo, ausencia de API, permiso negado, valores nulos, timeout,
+calibración, modos de audio, histéresis 63°/66°, Mute, background, Refill y cambio
+de bebida.
+
+## Prueba manual en computador
+
+1. Sirva la carpeta y abra `http://localhost:8000/?debug=1` con la consola visible.
+2. Confirme que no aparece permiso ni sonido al cargar.
+3. Elija Beer y revise jarra, asa fuera de la cavidad, profundidad, espuma y
+   burbujas variadas.
+4. Use Fill level con `100, 80, 60, 40, 20 y 5 %` y Side tilt con `0, ±30, ±50,
+   ±65, ±72 y ±78°` según la matriz de aceptación.
+5. Compruebe que Diagnostics muestra 39° → 45° físico, 65° → 75° físico y 78° →
+   90° físico, sin que el slider muestre más de 78°.
+6. Mantenga un ángulo con overflow: debe vaciar solo hasta `capacity`, parar nivel
+   y audio, y mostrar `tilted-no-flow`.
+7. Aumente el ángulo y confirme que el flujo se reanuda. A ±78° debe poder llegar
+   a vacío y mostrar **Empty — tap Refill**.
+8. Repita con Cola y confirme espuma más fina, burbuja más activa, transmisión
+   rojiza y ausencia de asa.
+9. Pulse Enable Motion. Si el computador no entrega orientación, espere cinco
+   segundos y confirme que el aviso no bloquea los sliders.
+10. Pruebe Refill, Mute/Unmute, Diagnostics, Copy diagnostics, cambio de bebida,
+    segundo plano y reduced motion.
+11. Confirme que no hay errores no capturados en la consola.
+
+## Prueba auditiva manual pendiente
+
+La automatización verifica estados, tiempos y ausencia de loops, pero no puede
+certificar percepción humana. Con altavoces físicos y, cuando existan, muestras
+licenciadas:
+
+1. Beer recta durante 20 s: burbujeo bajo, irregular y sin zumbido.
+2. Cola recta durante 20 s: algo más activa que Beer.
+3. Inclinación sin contacto: ningún sonido humano.
+4. Flujo por debajo del umbral alto: `sipping`.
+5. Cruces repetidos 63°–67°: transición estable, sin parpadeo.
+6. Flujo alto: `chugging`; 78° sigue siendo el máximo.
+7. Ángulo fijo hasta `capacity`: el consumo se detiene; inclinar más lo reanuda.
+8. Vaso vacío, Mute y segundo plano: silencio inmediato.
+9. Cambio Beer/Cola: ninguna superposición.
+10. Refill: sonido solo durante la recarga.
+
+## Prueba física pendiente — iPhone Safari
+
+Estas comprobaciones **no se declaran realizadas**:
+
+1. Publique en GitHub Pages y abra la URL HTTPS en Safari con el iPhone vertical.
+2. Elija una bebida, pulse Enable Motion y acepte el permiso.
+3. Confirme en Diagnostics que el listener aparece después de `granted` y que
+   beta/gamma reciben datos.
+4. Mantenga el teléfono vertical y quieto, pulse Calibrate y espere `ready`.
+5. Compruebe ambos signos, dirección intuitiva, suavidad y saturación estable en
+   aproximadamente 77.5°–78° sin exigir 80°/90° reales.
+6. Verifique que un ángulo fijo se detiene en `capacity` y uno mayor reanuda el
+   flujo; a ±78° debe vaciar completamente.
+7. Revise clipping, espuma, asa, nitidez Retina, rendimiento, safe areas, notch o
+   Dynamic Island y controles accesibles con el pulgar.
+8. Ejecute la lista auditiva, Refill, Mute, background y cambio Beer/Cola.
+9. Repita negando el permiso y bloqueando datos: el modo manual debe seguir
+   operativo.
+10. Revise la consola remota y copie Diagnostics ante cualquier incidencia.
+
+## Prueba física pendiente — Android Chrome
+
+Estas comprobaciones **no se declaran realizadas**:
+
+1. Abra la URL HTTPS en Chrome con el teléfono vertical.
+2. Pulse Enable Motion; acepte si aparece permiso o confirme `not-required`.
+3. Calibre y compruebe gamma relativa real, ambos signos, filtro y saturación a
+   ±78°.
+4. Valide contacto con el borde, parada en `capacity`, reanudación al inclinar más
+   y vaciado total sin alcanzar 80°/90° físicos.
+5. Revise renderer, clip, asa de Beer, highball de Cola, rendimiento, densidad de
+   píxeles, safe areas y controles.
+6. Ejecute la lista auditiva completa y pruebe Refill, Mute, background, cambio de
+   bebida y reduced motion.
+7. Niegue o bloquee el sensor y confirme el aviso y el modo manual completo.
+8. Revise la consola remota y copie Diagnostics.
+
+## Publicación en GitHub Pages
+
+1. Cree un repositorio, por ejemplo `tilt-sip`.
+2. Copie los archivos del proyecto a su raíz conservando las rutas relativas.
+3. Haga commit y push a `main`.
+4. En GitHub abra **Settings → Pages**.
+5. Seleccione **Deploy from a branch**, rama `main`, carpeta `/(root)`.
+6. Abra `https://USUARIO.github.io/tilt-sip/` y ejecute ambas listas físicas.
+
+TiltSip no usa magnetómetro, orientación absoluta, geolocalización, cámara ni
+micrófono. No recopila ni envía datos.
+
+## Criterio para retirar `rc.1`
+
+No se debe etiquetar como 2.0.0 final hasta completar y documentar:
+
+- permiso, calibración, ±78° y rendimiento en iPhone Safari físico;
+- permiso/not-required, ±78° y rendimiento en Android Chrome físico;
+- escucha humana con muestras originales o de licencia redistribuible;
+- ausencia de clicks, clipping, solapamiento y sonidos artificiales molestos;
+- revisión perceptual del material del vidrio, líquido y espuma en pantallas
+  físicas de alta densidad.
