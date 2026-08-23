@@ -1,7 +1,16 @@
 "use strict";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const SENSOR_TIMEOUT_MS = 5000;
+const CALIBRATION_DURATION_MS = 550;
+const MIN_CALIBRATION_SAMPLES = 4;
+const DRINK_THRESHOLD_DEGREES = 18;
+const MAX_MOUTH_DEGREES = 70;
+const MAX_SIDE_DEGREES = 55;
+const MIN_DRINK_RATE = 0.06;
+const MAX_DRINK_RATE = 0.2;
+const REFILL_RATE = 1.8;
+const SMOOTHING_RESPONSE = 14;
 
 const DRINKS = Object.freeze({
   beer: Object.freeze({
@@ -48,7 +57,7 @@ const DRINKS = Object.freeze({
 
 const state = {
   drinkKey: null,
-  fill: 0,
+  level: 0,
   sideTilt: 0,
   mouthTilt: 0,
   diagnosticsOpen: false
@@ -63,7 +72,22 @@ const motionState = {
   lastEvent: null,
   eventCount: 0,
   listenerRegistered: false,
-  timeoutId: null
+  timeoutId: null,
+  betaBase: null,
+  gammaBase: null,
+  calibrated: false,
+  calibrationSamples: [],
+  calibrationTimerId: null,
+  calculatedMouth: 0,
+  calculatedSide: 0,
+  smoothedMouth: 0,
+  smoothedSide: 0,
+  invertDirection: false,
+  inputMode: "manual",
+  simulationStatus: "ready",
+  isRefilling: false,
+  animationFrameId: null,
+  lastFrameTime: null
 };
 
 const elements = {
@@ -77,6 +101,7 @@ const elements = {
   bubbles: document.querySelector("#bubbles"),
   foam: document.querySelector("#foam"),
   fillReadout: document.querySelector("#fillReadout"),
+  levelLabel: document.querySelector("#levelLabel"),
   fillControl: document.querySelector("#fillControl"),
   fillOutput: document.querySelector("#fillOutput"),
   sideTiltControl: document.querySelector("#sideTiltControl"),
@@ -87,6 +112,9 @@ const elements = {
   refillButton: document.querySelector("#refillButton"),
   controlsButton: document.querySelector("#controlsButton"),
   enableMotionButton: document.querySelector("#enableMotionButton"),
+  calibrationCard: document.querySelector("#calibrationCard"),
+  calibrationPrompt: document.querySelector("#calibrationPrompt"),
+  calibrateButton: document.querySelector("#calibrateButton"),
   motionMessage: document.querySelector("#motionMessage"),
   diagnosticPanel: document.querySelector("#diagnosticPanel"),
   copyDiagnosticsButton: document.querySelector("#copyDiagnosticsButton"),
@@ -97,6 +125,13 @@ const elements = {
   gammaValue: document.querySelector("#gammaValue"),
   lastEventValue: document.querySelector("#lastEventValue"),
   eventCountValue: document.querySelector("#eventCountValue"),
+  betaBaseValue: document.querySelector("#betaBaseValue"),
+  gammaBaseValue: document.querySelector("#gammaBaseValue"),
+  calculatedMouthValue: document.querySelector("#calculatedMouthValue"),
+  calculatedSideValue: document.querySelector("#calculatedSideValue"),
+  currentLevelValue: document.querySelector("#currentLevelValue"),
+  simulationStateValue: document.querySelector("#simulationStateValue"),
+  invertDirectionControl: document.querySelector("#invertDirectionControl"),
   versionLabel: document.querySelector(".version-label"),
   liveStatus: document.querySelector("#liveStatus")
 };
@@ -105,6 +140,27 @@ const debugRequested = new URLSearchParams(window.location.search).get("debug") 
 
 function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
+}
+
+function normalizeAngleDifference(value, reference) {
+  let difference = (value - reference) % 360;
+  if (difference > 180) difference -= 360;
+  if (difference < -180) difference += 360;
+  return difference;
+}
+
+function circularMeanDegrees(values) {
+  const totals = values.reduce(
+    (sum, value) => {
+      const radians = value * Math.PI / 180;
+      sum.sine += Math.sin(radians);
+      sum.cosine += Math.cos(radians);
+      return sum;
+    },
+    { sine: 0, cosine: 0 }
+  );
+
+  return Math.atan2(totals.sine, totals.cosine) * 180 / Math.PI;
 }
 
 function seededFraction(seed) {
@@ -171,31 +227,42 @@ function createFoamCells(count, seedOffset) {
 }
 
 function syncControls() {
-  elements.fillControl.value = String(state.fill);
+  const fillPercent = Math.round(state.level * 100);
+  elements.fillControl.value = String(fillPercent);
   elements.sideTiltControl.value = String(state.sideTilt);
   elements.mouthTiltControl.value = String(state.mouthTilt);
-  elements.fillOutput.value = `${state.fill}%`;
+  elements.fillOutput.value = `${fillPercent}%`;
   elements.sideTiltOutput.value = `${state.sideTilt}°`;
   elements.mouthTiltOutput.value = `${state.mouthTilt}°`;
 }
 
-function renderLiquid() {
-  const visibleLevel = clamp(100 - state.fill - state.mouthTilt * 0.12, -8, 100);
-  const surfaceDepth = 0.58 + state.mouthTilt * 0.011;
-  const glassPitch = state.mouthTilt * 0.08;
+function renderLiquid(syncManualControls = true) {
+  const usingMotion = motionState.inputMode === "motion" && motionState.calibrated;
+  const sideTilt = usingMotion
+    ? clamp(-motionState.smoothedSide * 18 / MAX_SIDE_DEGREES, -18, 18)
+    : state.sideTilt;
+  const mouthTilt = usingMotion ? clamp(motionState.smoothedMouth, 0, 60) : state.mouthTilt;
+  const fillPercent = Math.round(state.level * 100);
+  const visibleLevel = clamp(100 - state.level * 100 - mouthTilt * 0.12, -8, 100);
+  const surfaceDepth = 0.58 + mouthTilt * 0.011;
+  const glassPitch = mouthTilt * 0.08;
 
   setCssVariable("--liquid-level", `${visibleLevel.toFixed(2)}%`);
-  setCssVariable("--liquid-angle", `${state.sideTilt}deg`);
+  setCssVariable("--liquid-angle", `${sideTilt.toFixed(2)}deg`);
   setCssVariable("--surface-depth", surfaceDepth.toFixed(2));
   setCssVariable("--glass-pitch", `${glassPitch.toFixed(2)}deg`);
 
-  elements.liquid.classList.toggle("is-empty", state.fill === 0);
-  elements.fillReadout.textContent = `${state.fill}%`;
+  elements.liquid.classList.toggle("is-empty", state.level <= 0);
+  elements.fillReadout.textContent = `${fillPercent}%`;
+  elements.levelLabel.textContent = state.level <= 0 ? "empty" : "full";
+  elements.fillControl.value = String(fillPercent);
+  elements.fillOutput.value = `${fillPercent}%`;
   elements.glassWrap.setAttribute(
     "aria-label",
-    `A glass of ${DRINKS[state.drinkKey].name.toLowerCase()}, ${state.fill} percent full`
+    `A glass of ${DRINKS[state.drinkKey].name.toLowerCase()}, ${fillPercent} percent full`
   );
-  syncControls();
+
+  if (syncManualControls) syncControls();
 }
 
 function setDiagnostics(open) {
@@ -210,9 +277,11 @@ function selectDrink(drinkKey) {
   if (!drink) return;
 
   state.drinkKey = drinkKey;
-  state.fill = drink.initialFill;
+  state.level = drink.initialFill / 100;
   state.sideTilt = 0;
   state.mouthTilt = 0;
+  motionState.isRefilling = false;
+  setSimulationStatus("ready");
 
   elements.app.dataset.drink = drinkKey;
   elements.currentDrinkName.textContent = drink.name;
@@ -225,6 +294,8 @@ function selectDrink(drinkKey) {
 
   elements.chooserScreen.hidden = true;
   elements.drinkScreen.hidden = false;
+  updateCalibrationUi();
+  startAnimationLoop();
   elements.backButton.focus({ preventScroll: true });
 }
 
@@ -233,15 +304,53 @@ function returnToChooser() {
   elements.drinkScreen.hidden = true;
   elements.chooserScreen.hidden = false;
   state.drinkKey = null;
+  motionState.isRefilling = false;
+  motionState.lastFrameTime = null;
+
+  if (motionState.animationFrameId !== null) {
+    window.cancelAnimationFrame(motionState.animationFrameId);
+    motionState.animationFrameId = null;
+  }
+
+  if (motionState.calibrationTimerId !== null) {
+    window.clearTimeout(motionState.calibrationTimerId);
+    motionState.calibrationTimerId = null;
+    motionState.calibrationSamples = [];
+    setSimulationStatus("ready");
+    updateCalibrationUi();
+  }
+
   elements.drinkCards[0].focus({ preventScroll: true });
 }
 
 function refillGlass() {
-  state.fill = 100;
+  if (motionState.calibrationTimerId !== null) {
+    window.clearTimeout(motionState.calibrationTimerId);
+    motionState.calibrationTimerId = null;
+    motionState.calibrationSamples = [];
+    motionState.calibrated = false;
+    motionState.inputMode = "manual";
+  }
+
   state.sideTilt = 0;
   state.mouthTilt = 0;
+  motionState.isRefilling = state.level < 1;
+  setSimulationStatus("ready");
+
+  if (motionState.isRefilling) {
+    setMotionMessage("Refilling…", "success");
+  } else {
+    state.level = 1;
+    setMotionMessage("The glass is full.", "success");
+  }
+
+  if (motionState.listenerRegistered && !motionState.calibrated) {
+    updateCalibrationUi("Hold your phone upright and tap Calibrate");
+  }
+
   renderLiquid();
-  elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} refilled to 100 percent.`;
+  renderMotionDiagnostics();
+  startAnimationLoop();
 }
 
 function readNumber(input) {
@@ -266,6 +375,164 @@ function setMotionMessage(message, tone = "neutral") {
   elements.motionMessage.dataset.tone = tone;
 }
 
+function setSimulationStatus(status) {
+  motionState.simulationStatus = status;
+}
+
+function updateCalibrationUi(message = "") {
+  elements.calibrationCard.hidden = !motionState.listenerRegistered;
+  if (!motionState.listenerRegistered) return;
+
+  if (motionState.simulationStatus === "calibrating") {
+    elements.calibrationPrompt.textContent = message || "Keep your phone upright and still…";
+    elements.calibrateButton.textContent = "Calibrating…";
+    elements.calibrateButton.disabled = true;
+    return;
+  }
+
+  elements.calibrationPrompt.textContent = message || (
+    motionState.calibrated
+      ? "Calibrated. Tilt the top edge toward your mouth."
+      : "Hold your phone upright and tap Calibrate"
+  );
+  elements.calibrateButton.textContent = motionState.calibrated ? "Recalibrate" : "Calibrate";
+  elements.calibrateButton.disabled = false;
+}
+
+function updateCalculatedAngles() {
+  if (
+    !motionState.calibrated
+    || !Number.isFinite(motionState.beta)
+    || !Number.isFinite(motionState.gamma)
+  ) {
+    motionState.calculatedMouth = 0;
+    motionState.calculatedSide = 0;
+    return;
+  }
+
+  const betaDifference = normalizeAngleDifference(motionState.beta, motionState.betaBase);
+  const gammaDifference = normalizeAngleDifference(motionState.gamma, motionState.gammaBase);
+  const drinkingDirection = motionState.invertDirection ? 1 : -1;
+
+  motionState.calculatedMouth = clamp(
+    betaDifference * drinkingDirection,
+    0,
+    MAX_MOUTH_DEGREES
+  );
+  motionState.calculatedSide = clamp(gammaDifference, -MAX_SIDE_DEGREES, MAX_SIDE_DEGREES);
+}
+
+function stopDrinkingSound() {
+  // Version 0.3.0 has no audio source; this keeps the empty-state stop explicit.
+}
+
+function handleEmptyGlass() {
+  const wasAlreadyEmpty = motionState.simulationStatus === "empty" && state.level === 0;
+  state.level = 0;
+  motionState.isRefilling = false;
+  setSimulationStatus("empty");
+  stopDrinkingSound();
+  setMotionMessage("Empty — tap Refill", "warning");
+
+  if (!wasAlreadyEmpty && state.drinkKey) {
+    elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} is empty. Tap Refill.`;
+  }
+}
+
+function startAnimationLoop() {
+  if (!state.drinkKey || motionState.animationFrameId !== null) return;
+  motionState.lastFrameTime = null;
+  motionState.animationFrameId = window.requestAnimationFrame(animateSimulation);
+}
+
+function animateSimulation(timestamp) {
+  motionState.animationFrameId = null;
+
+  if (!state.drinkKey) {
+    motionState.lastFrameTime = null;
+    return;
+  }
+
+  const elapsed = motionState.lastFrameTime === null
+    ? 1 / 60
+    : (timestamp - motionState.lastFrameTime) / 1000;
+  const deltaTime = clamp(elapsed, 0, 0.05);
+  motionState.lastFrameTime = timestamp;
+
+  updateCalculatedAngles();
+
+  const smoothing = 1 - Math.exp(-SMOOTHING_RESPONSE * deltaTime);
+  motionState.smoothedMouth += (
+    motionState.calculatedMouth - motionState.smoothedMouth
+  ) * smoothing;
+  motionState.smoothedSide += (
+    motionState.calculatedSide - motionState.smoothedSide
+  ) * smoothing;
+
+  if (motionState.isRefilling) {
+    state.level = clamp(state.level + REFILL_RATE * deltaTime, 0, 1);
+
+    if (state.level >= 1) {
+      state.level = 1;
+      motionState.isRefilling = false;
+      setSimulationStatus("ready");
+      setMotionMessage(
+        motionState.calibrated
+          ? "Refilled. Tilt the top edge toward your mouth to drink."
+          : "Refilled. Manual controls are ready; calibrate motion when available.",
+        "success"
+      );
+      elements.liveStatus.textContent = `${DRINKS[state.drinkKey].name} refilled to 100 percent.`;
+    }
+  } else if (
+    motionState.inputMode === "motion"
+    && motionState.calibrated
+    && state.level > 0
+  ) {
+    const isDrinking = motionState.calculatedMouth > DRINK_THRESHOLD_DEGREES;
+
+    if (isDrinking) {
+      const intensity = clamp(
+        (motionState.calculatedMouth - DRINK_THRESHOLD_DEGREES)
+          / (MAX_MOUTH_DEGREES - DRINK_THRESHOLD_DEGREES),
+        0,
+        1
+      );
+      const drinkRate = MIN_DRINK_RATE + (MAX_DRINK_RATE - MIN_DRINK_RATE) * intensity;
+      state.level = clamp(state.level - drinkRate * deltaTime, 0, 1);
+
+      if (motionState.simulationStatus !== "drinking") {
+        setSimulationStatus("drinking");
+        setMotionMessage("Drinking… Straighten your phone to stop.", "success");
+      }
+    } else if (motionState.simulationStatus === "drinking") {
+      setSimulationStatus("ready");
+      stopDrinkingSound();
+      setMotionMessage("Ready. Tilt the top edge toward your mouth to drink.", "success");
+    }
+  }
+
+  if (
+    state.level <= 0
+    && motionState.simulationStatus !== "calibrating"
+    && motionState.simulationStatus !== "empty"
+  ) {
+    handleEmptyGlass();
+  }
+
+  renderLiquid(false);
+  renderMotionDiagnostics();
+
+  if (
+    motionState.isRefilling
+    || (motionState.inputMode === "motion" && motionState.calibrated)
+  ) {
+    motionState.animationFrameId = window.requestAnimationFrame(animateSimulation);
+  } else {
+    motionState.lastFrameTime = null;
+  }
+}
+
 function renderMotionDiagnostics() {
   elements.protocolValue.textContent = motionState.protocol;
   elements.apiValue.textContent = motionState.apiAvailable ? "available" : "unavailable";
@@ -275,6 +542,12 @@ function renderMotionDiagnostics() {
   elements.gammaValue.textContent = formatAngle(motionState.gamma);
   elements.lastEventValue.textContent = formatEventTime(motionState.lastEvent);
   elements.eventCountValue.textContent = String(motionState.eventCount);
+  elements.betaBaseValue.textContent = formatAngle(motionState.betaBase);
+  elements.gammaBaseValue.textContent = formatAngle(motionState.gammaBase);
+  elements.calculatedMouthValue.textContent = formatAngle(motionState.calculatedMouth);
+  elements.calculatedSideValue.textContent = formatAngle(motionState.calculatedSide);
+  elements.currentLevelValue.textContent = state.level.toFixed(3);
+  elements.simulationStateValue.textContent = motionState.simulationStatus;
   elements.enableMotionButton.setAttribute("aria-pressed", String(motionState.listenerRegistered));
 }
 
@@ -286,16 +559,92 @@ function handleDeviceOrientation(event) {
   motionState.lastEvent = new Date();
   motionState.eventCount += 1;
 
+  if (motionState.simulationStatus === "calibrating") {
+    motionState.calibrationSamples.push({ beta: event.beta, gamma: event.gamma });
+  }
+
   if (motionState.timeoutId !== null) {
     window.clearTimeout(motionState.timeoutId);
     motionState.timeoutId = null;
   }
 
-  if (motionState.eventCount === 1) {
-    setMotionMessage("Motion data received. Sensor values are diagnostic only.", "success");
+  if (motionState.eventCount === 1 && motionState.simulationStatus !== "calibrating") {
+    setMotionMessage("Motion data received. Hold your phone upright and tap Calibrate.", "success");
   }
 
   renderMotionDiagnostics();
+}
+
+function finishCalibration() {
+  motionState.calibrationTimerId = null;
+  const samples = motionState.calibrationSamples;
+  motionState.calibrationSamples = [];
+
+  if (samples.length < MIN_CALIBRATION_SAMPLES) {
+    motionState.calibrated = false;
+    motionState.inputMode = "manual";
+    setSimulationStatus(state.level <= 0 ? "empty" : "ready");
+    updateCalibrationUi("Not enough sensor readings. Keep the phone upright and try again.");
+    if (state.level <= 0) {
+      handleEmptyGlass();
+    } else {
+      setMotionMessage(
+        "Calibration needs more valid readings. Manual controls remain fully functional.",
+        "warning"
+      );
+    }
+    renderMotionDiagnostics();
+    return;
+  }
+
+  motionState.betaBase = circularMeanDegrees(samples.map((sample) => sample.beta));
+  motionState.gammaBase = circularMeanDegrees(samples.map((sample) => sample.gamma));
+  motionState.calibrated = true;
+  motionState.inputMode = "motion";
+  motionState.calculatedMouth = 0;
+  motionState.calculatedSide = 0;
+  motionState.smoothedMouth = 0;
+  motionState.smoothedSide = 0;
+  setSimulationStatus(state.level <= 0 ? "empty" : "ready");
+  updateCalibrationUi();
+
+  if (state.level <= 0) {
+    handleEmptyGlass();
+  } else {
+    setMotionMessage("Calibrated. Tilt the top edge toward your mouth to drink.", "success");
+    elements.liveStatus.textContent = "Motion calibrated and ready.";
+  }
+
+  renderLiquid();
+  renderMotionDiagnostics();
+  startAnimationLoop();
+}
+
+function beginCalibration() {
+  if (!motionState.listenerRegistered) {
+    setMotionMessage("Enable Motion before calibrating.", "warning");
+    return;
+  }
+
+  if (motionState.calibrationTimerId !== null) {
+    window.clearTimeout(motionState.calibrationTimerId);
+  }
+
+  motionState.calibrated = false;
+  motionState.calibrationSamples = [];
+  motionState.calculatedMouth = 0;
+  motionState.calculatedSide = 0;
+  motionState.smoothedMouth = 0;
+  motionState.smoothedSide = 0;
+  setSimulationStatus("calibrating");
+  updateCalibrationUi();
+  setMotionMessage("Calibrating… Keep your phone upright and still.", "neutral");
+  renderMotionDiagnostics();
+
+  motionState.calibrationTimerId = window.setTimeout(
+    finishCalibration,
+    CALIBRATION_DURATION_MS
+  );
 }
 
 function startSensorTimeout() {
@@ -321,7 +670,8 @@ function registerOrientationListener() {
 
   window.addEventListener("deviceorientation", handleDeviceOrientation, { passive: true });
   motionState.listenerRegistered = true;
-  setMotionMessage("Motion enabled. Waiting up to 5 seconds for orientation data…", "neutral");
+  updateCalibrationUi("Hold your phone upright and tap Calibrate");
+  setMotionMessage("Motion enabled. Hold your phone upright, then tap Calibrate.", "neutral");
   startSensorTimeout();
 }
 
@@ -335,7 +685,14 @@ function diagnosticsText() {
     `Beta: ${formatAngle(motionState.beta)}`,
     `Gamma: ${formatAngle(motionState.gamma)}`,
     `Last event: ${formatEventTime(motionState.lastEvent)}`,
-    `Events received: ${motionState.eventCount}`
+    `Events received: ${motionState.eventCount}`,
+    `Beta base: ${formatAngle(motionState.betaBase)}`,
+    `Gamma base: ${formatAngle(motionState.gammaBase)}`,
+    `Tilt to mouth: ${formatAngle(motionState.calculatedMouth)}`,
+    `Side tilt: ${formatAngle(motionState.calculatedSide)}`,
+    `Current level: ${state.level.toFixed(3)}`,
+    `State: ${motionState.simulationStatus}`,
+    `Invert drinking direction: ${motionState.invertDirection ? "yes" : "no"}`
   ].join("\n");
 }
 
@@ -373,6 +730,25 @@ async function copyDiagnostics() {
   }
 }
 
+function activateManualMode() {
+  motionState.inputMode = "manual";
+  motionState.isRefilling = false;
+
+  if (state.level <= 0) {
+    handleEmptyGlass();
+  } else {
+    setSimulationStatus("ready");
+    setMotionMessage(
+      motionState.calibrated
+        ? "Manual controls are active. Tap Recalibrate to return to motion."
+        : "Manual controls are active and fully functional.",
+      "neutral"
+    );
+  }
+
+  renderMotionDiagnostics();
+}
+
 function bindEvents() {
   elements.drinkCards.forEach((card) => {
     card.addEventListener("click", () => selectDrink(card.dataset.drink));
@@ -384,19 +760,42 @@ function bindEvents() {
   elements.copyDiagnosticsButton.addEventListener("click", () => {
     void copyDiagnostics();
   });
+  elements.calibrateButton.addEventListener("click", beginCalibration);
+  elements.invertDirectionControl.addEventListener("change", (event) => {
+    motionState.invertDirection = event.currentTarget.checked;
+    motionState.calculatedMouth = 0;
+    motionState.smoothedMouth = 0;
+
+    if (motionState.calibrated) {
+      if (state.level <= 0) {
+        handleEmptyGlass();
+      } else {
+        setSimulationStatus("ready");
+        setMotionMessage(
+          "Drinking direction inverted. Keep the phone upright or recalibrate if needed.",
+          "neutral"
+        );
+      }
+    }
+
+    renderMotionDiagnostics();
+  });
 
   elements.fillControl.addEventListener("input", (event) => {
-    state.fill = readNumber(event.currentTarget);
+    state.level = clamp(readNumber(event.currentTarget) / 100, 0, 1);
+    activateManualMode();
     renderLiquid();
   });
 
   elements.sideTiltControl.addEventListener("input", (event) => {
     state.sideTilt = readNumber(event.currentTarget);
+    activateManualMode();
     renderLiquid();
   });
 
   elements.mouthTiltControl.addEventListener("input", (event) => {
     state.mouthTilt = readNumber(event.currentTarget);
+    activateManualMode();
     renderLiquid();
   });
 
@@ -421,11 +820,12 @@ function bindEvents() {
 
       if (motionState.listenerRegistered) {
         setMotionMessage(
-          motionState.eventCount > 0
-            ? "Motion is already enabled. Sensor values are diagnostic only."
-            : "Motion is enabled but no valid data has arrived yet. Manual controls remain available.",
+          motionState.calibrated
+            ? "Motion is enabled and calibrated. Tap Recalibrate whenever the upright position changes."
+            : "Motion is enabled. Hold your phone upright and tap Calibrate.",
           motionState.eventCount > 0 ? "success" : "warning"
         );
+        updateCalibrationUi();
         renderMotionDiagnostics();
         setDiagnostics(true);
         return;

@@ -1,10 +1,10 @@
-# TiltSip — sensores y diagnóstico 0.2.0
+# TiltSip 0.3.0 — bebida por inclinación
 
-TiltSip es una experiencia web móvil original que simula un vaso con líquido. La fase 1 visual continúa completa y la fase 2 añade acceso opcional al sensor de orientación, diagnóstico de `beta` y `gamma`, y manejo seguro de permisos.
+TiltSip es una experiencia web móvil original que simula un vaso con líquido. Conserva la interfaz visual y el diagnóstico de sensores de las fases anteriores, y ahora conecta `DeviceOrientationEvent` con la simulación después de una calibración explícita.
 
-Los datos del sensor todavía no cambian el nivel ni la inclinación del líquido. En esta versión son exclusivamente diagnósticos.
+La aplicación está pensada principalmente para un teléfono en orientación vertical. El modo manual continúa disponible en computador y también funciona como alternativa cuando el sensor no existe, el permiso se niega o no llegan datos.
 
-## Archivos del proyecto
+## Archivos
 
 ```text
 tilt-sip/
@@ -14,120 +14,124 @@ tilt-sip/
 └── README.md
 ```
 
-El proyecto usa exclusivamente HTML, CSS y JavaScript puro. No necesita React, npm, backend, base de datos ni dependencias externas.
+Solo usa HTML, CSS y JavaScript puro. No necesita React, npm, backend, base de datos ni dependencias externas. Las rutas `./styles.css` y `./app.js` son relativas y funcionan bajo `/tilt-sip/` en GitHub Pages.
 
-## Cómo abrirlo
+## Cómo abrirlo en un computador
 
-### Modo manual en computador
-
-Puede abrir `index.html` directamente. Para una prueba más parecida a GitHub Pages, abra una terminal dentro de la carpeta `tilt-sip` y ejecute:
+Puede abrir `index.html` directamente. Para probarlo con un servidor local, abra una terminal en la carpeta `tilt-sip` y ejecute:
 
 ```bash
-python -m http.server 8000
+python3 -m http.server 8000
 ```
 
-En Windows, si `python` no funciona, pruebe:
+En Windows también puede usar:
 
 ```bash
 py -m http.server 8000
 ```
 
-Después visite `http://localhost:8000`.
+Después visite `http://localhost:8000`. En computador, use **Controls & diagnostics** para cambiar Fill level, Side tilt y Tilt to mouth. Los sensores pueden no estar disponibles sobre HTTP, pero el modo manual no depende de ellos.
 
-La selección Beer/Cola, el nivel, las inclinaciones manuales y Refill deben funcionar aunque el computador no tenga sensores compatibles.
+## Qué implementa la versión 0.3.0
 
-### Sensores en un teléfono
+- Mantiene Beer y Cola, con colores, espuma y burbujas definidos en el objeto central `DRINKS`.
+- Mantiene el líquido y la espuma recortados dentro del vaso.
+- Solicita el permiso de orientación solamente al pulsar **Enable Motion**.
+- Conserva la detección por funcionalidad y el aviso de cinco segundos cuando no llegan eventos válidos.
+- Muestra “Hold your phone upright and tap Calibrate” antes de calibrar.
+- Recoge lecturas válidas durante unos 550 ms y calcula las referencias de beta y gamma mediante un promedio angular.
+- Normaliza las diferencias angulares y limita valores extremos.
+- Usa beta respecto a la referencia para detectar la inclinación hacia la boca.
+- Usa gamma respecto a la referencia para inclinar la superficie sin consumir líquido.
+- Suaviza el movimiento visual y procesa la simulación con `requestAnimationFrame`.
+- Calcula el vaciado con `deltaTime`, independientemente de la frecuencia de la pantalla.
+- Empieza a beber al superar 18°; una inclinación leve consume despacio y una profunda consume hasta 0.20 del vaso por segundo.
+- Un vaso al 100 % tarda aproximadamente 5 segundos en vaciarse con una inclinación profunda sostenida.
+- Limita siempre el nivel interno al intervalo de `0` a `1`.
+- Detiene el estado de consumo al enderezar el teléfono y muestra **Empty — tap Refill** al llegar a cero.
+- Anima **Refill** hasta el 100 % y vuelve a mostrar Calibrate cuando aún no existe una calibración válida.
+- Permite activar **Invert drinking direction** si el signo de beta es contrario en un dispositivo.
+- Mantiene todos los controles manuales; mover cualquiera de ellos pasa la simulación a modo manual. Pulse **Recalibrate** para volver al sensor.
+- Muestra la versión `0.3.0` en diagnóstico.
 
-Para probar sensores en un dispositivo físico, publique el proyecto mediante GitHub Pages y abra su dirección `https://...` directamente en Safari o Chrome. Los sensores modernos están restringidos a contextos seguros; abrir el archivo directamente o usar una dirección HTTP de la red local puede dejar la API sin datos.
+TiltSip no genera audio en esta fase. Al quedar vacío cancela explícitamente el estado `drinking`. Tampoco usa magnetómetro, geolocalización, cámara ni micrófono, y no recopila ni envía datos.
 
-## Qué conserva de la fase 1
+## Flujo de permiso y calibración
 
-- Selección entre Beer y Cola.
-- Vaso responsive con líquido, espuma y burbujas configurables.
-- Recorte estricto del líquido y la espuma dentro del vaso.
-- Botones Drinks y Refill.
-- Controles manuales para nivel, inclinación lateral e inclinación hacia la boca.
-- Reinicio del nivel y de las inclinaciones al cambiar de bebida.
-- Objeto central `DRINKS` con colores, espuma y cantidad de burbujas.
-- `100dvh`, áreas seguras de iPhone y bloqueo del desplazamiento de la página.
+1. Seleccione Beer o Cola.
+2. Pulse **Enable Motion**. El permiso nunca se solicita al cargar la página.
+3. Si el navegador exige `DeviceOrientationEvent.requestPermission()`, TiltSip lo llama directamente dentro de ese click y registra el listener solamente si devuelve `granted`.
+4. Si el método no existe, registra directamente el listener. Si la API no existe o el permiso falla, mantiene el modo manual.
+5. Sostenga el teléfono vertical, quieto y en la posición natural desde la que va a beber.
+6. Pulse **Calibrate** y manténgalo quieto durante aproximadamente medio segundo.
+7. Cuando el estado sea `ready`, acerque el borde superior del teléfono hacia la boca. Enderécelo para detener el consumo.
+8. Si el nivel no baja en la dirección esperada, active **Invert drinking direction** en el panel y vuelva a probar. Puede pulsar **Recalibrate** cuando cambie su postura.
 
-## Qué añade la fase 2
+## Diagnóstico
 
-- Botón visible **Enable Motion** después de escoger una bebida.
-- Solicitud de permiso ejecutada directamente desde el click del botón.
-- Detección por funcionalidad de `DeviceOrientationEvent` y `requestPermission`.
-- Registro del listener solamente después de obtener `granted`, cuando el navegador exige permiso.
-- Registro directo del listener cuando `requestPermission` no existe.
-- Rechazo silencioso de eventos cuyo `beta` o `gamma` sea `null`, `NaN` o no numérico.
-- Espera de cinco segundos para detectar ausencia de datos y recomendar el modo manual.
-- Panel con protocolo, disponibilidad de API, permiso, beta, gamma, último evento, contador y versión.
-- Botón **Copy diagnostics**.
-- Versión `0.2.0`.
+Abra **Controls & diagnostics** o añada `?debug=1` a la dirección. El panel muestra:
 
-## Flujo del permiso
+- protocolo HTTPS o no;
+- disponibilidad de la API;
+- permiso;
+- beta y gamma actuales;
+- hora y número de eventos;
+- beta base y gamma base;
+- inclinación calculada hacia la boca;
+- inclinación lateral calculada;
+- nivel actual entre `0.000` y `1.000`;
+- estado `calibrating`, `ready`, `drinking` o `empty`;
+- control **Invert drinking direction**;
+- versión `0.3.0`.
 
-El permiso nunca se solicita al cargar la página ni al escoger una bebida. Solo se intenta después de pulsar **Enable Motion**:
+**Copy diagnostics** copia todos esos valores en texto.
 
-1. Si `DeviceOrientationEvent` no existe, se informa que el sensor no está disponible y el modo manual sigue funcionando.
-2. Si existe `DeviceOrientationEvent.requestPermission`, se solicita el permiso y solo se registra el listener cuando el resultado es `granted`.
-3. Si `requestPermission` no existe, el listener se registra directamente y el panel muestra `not-required`.
-4. Si el usuario niega el permiso o ocurre un error, no se registra el listener y la aplicación conserva todos los controles manuales.
-5. Si no llega un evento válido durante cinco segundos, aparece un mensaje útil sin bloquear la aplicación.
+## Prueba exacta en computador
 
-## Panel de diagnóstico
+1. Abra `http://localhost:8000/?debug=1`.
+2. Elija Beer y confirme que el nivel inicial sea `0.820`; vuelva y elija Cola para confirmar `0.780` y un aspecto claramente diferente.
+3. Mueva **Fill level** hasta 0 y 100. Confirme que el líquido no sale del vaso y que la espuma acompaña a la superficie.
+4. Mueva **Side tilt** de -18° a 18° y **Tilt to mouth** de 0° a 60°.
+5. Pulse **Refill** desde un nivel bajo y compruebe que el llenado se anima hasta `1.000`.
+6. Pulse **Enable Motion**. Si el computador no ofrece la API o no entrega datos, confirme el mensaje útil y que todos los controles manuales continúan funcionando.
+7. Pulse **Copy diagnostics** y pegue el texto en un editor.
+8. Abra la consola y confirme que no aparecen errores.
 
-Seleccione una bebida y pulse **Controls & diagnostics**. También puede abrir la página con `?debug=1` para mostrar el panel automáticamente:
+## Prueba exacta en iPhone con Safari
 
-```text
-http://localhost:8000/?debug=1
-```
+1. Publique el proyecto en GitHub Pages y abra la dirección `https://...` directamente en Safari, con el iPhone en vertical.
+2. Elija Beer y pulse **Enable Motion**.
+3. En el diálogo de iOS, pulse **Allow**. Confirme `Permission: granted`.
+4. Mantenga el iPhone vertical y quieto; pulse **Calibrate** y espere a que el estado pase de `calibrating` a `ready`.
+5. Confirme que beta base y gamma base tienen valores y que, estando vertical, el nivel no baja.
+6. Incline solo a izquierda y derecha. Confirme que cambia Side tilt y se inclina la superficie, pero el nivel permanece igual.
+7. Acerque gradualmente el borde superior del iPhone hacia la boca. Confirme `drinking` y que el nivel baja más rápido con una inclinación profunda.
+8. Enderece el iPhone. Confirme que el estado vuelve inmediatamente a `ready` y el nivel deja de bajar.
+9. Mantenga una inclinación profunda: desde el 100 %, el vaciado debe tardar aproximadamente entre 4 y 7 segundos.
+10. Al llegar a cero, confirme `empty` y el mensaje **Empty — tap Refill**.
+11. Pulse **Refill** y confirme la animación hasta `1.000`. Si aparece la instrucción de calibración, sostenga el iPhone vertical y vuelva a calibrar.
+12. Si el vaso solo bebe al inclinarlo en la dirección contraria, active **Invert drinking direction**.
+13. Vuelva a Drinks, cambie a Cola y repita calibración, inclinación y Refill.
+14. Mueva un control manual para activar la alternativa manual; pulse **Recalibrate** para volver al sensor.
+15. Repita negando el permiso. Confirme que no se registra el listener, no se bloquea la aplicación y el modo manual funciona.
+16. Pulse **Copy diagnostics** y compruebe el texto copiado.
 
-El panel muestra:
+## Prueba exacta en Android con Chrome
 
-- **Protocol:** `HTTPS` o `Not HTTPS`.
-- **API:** `available` o `unavailable`.
-- **Permission:** `not-requested`, `granted`, `denied`, `not-required` o `error`.
-- **Beta:** inclinación frontal/trasera reportada por el navegador.
-- **Gamma:** inclinación lateral reportada por el navegador.
-- **Last event:** hora del último evento válido.
-- **Events received:** cantidad de eventos válidos procesados.
-- **Version:** `0.2.0`.
+1. Publique el proyecto en GitHub Pages y abra la dirección `https://...` directamente en Chrome, con el teléfono en vertical.
+2. Elija Cola y pulse **Enable Motion**.
+3. Si Chrome solicita permiso, acéptelo. Si no necesita ese método, confirme `Permission: not-required` y que beta/gamma cambian.
+4. Mantenga el teléfono vertical y quieto; pulse **Calibrate** hasta obtener el estado `ready` y referencias base numéricas.
+5. Déjelo vertical durante varios segundos y confirme que el nivel no baja.
+6. Incline solo a izquierda y derecha. Confirme que la superficie responde y el nivel no cambia.
+7. Incline el borde superior hacia la boca, primero poco y luego más. Confirme que el consumo comienza sobre el umbral y se acelera con una inclinación profunda.
+8. Enderece el teléfono y confirme que el nivel se detiene inmediatamente.
+9. Compruebe un vaciado profundo desde 100 %: debe durar aproximadamente entre 4 y 7 segundos.
+10. Confirme `empty`, **Empty — tap Refill** y Refill animado hasta `1.000`.
+11. Pruebe **Invert drinking direction** si el signo es contrario.
+12. Cambie entre Beer y Cola y confirme que ambos siguen funcionando.
+13. Mueva los tres controles manuales y confirme que siguen siendo una alternativa completa.
+14. Bloquee el permiso o pruebe un dispositivo sin datos: después de cinco segundos debe aparecer el aviso y el modo manual debe seguir funcionando.
+15. Pulse **Copy diagnostics** y revise que incluya bases, inclinaciones, nivel, estado y versión.
 
-## Prueba manual: iPhone con Safari
-
-1. Publique TiltSip en GitHub Pages y confirme que la dirección comience por `https://`.
-2. Abra esa dirección directamente en Safari, no dentro de la vista interna de otra aplicación.
-3. Seleccione Beer o Cola.
-4. Pulse **Enable Motion** una sola vez.
-5. Cuando Safari solicite acceso a movimiento y orientación, pulse **Allow**.
-6. Confirme en el panel:
-   - `Protocol: HTTPS`;
-   - `API: available`;
-   - `Permission: granted`;
-   - beta y gamma cambian al inclinar el iPhone;
-   - el contador aumenta y aparece la hora del último evento.
-7. Pulse **Copy diagnostics** y pegue el resultado en Notas para comprobar la copia.
-8. Mueva los tres controles manuales y confirme que siguen funcionando independientemente del sensor.
-9. Repita la prueba negando el permiso: debe aparecer el mensaje de modo manual y el vaso debe continuar funcionando.
-
-## Prueba manual: Android con Chrome
-
-1. Publique TiltSip en GitHub Pages y abra la dirección `https://` directamente en Chrome.
-2. Seleccione Beer o Cola.
-3. Pulse **Enable Motion**.
-4. Si Chrome muestra una solicitud de permiso, pulse **Allow**. En versiones que no requieren ese método, el panel mostrará `not-required` y registrará el listener directamente.
-5. Incline el teléfono hacia delante, atrás, izquierda y derecha.
-6. Confirme que beta, gamma, la hora y el contador cambian.
-7. Espere cinco segundos sin recibir datos en un dispositivo sin sensor o con acceso bloqueado: debe aparecer la recomendación de seguir con controles manuales.
-8. Pulse **Copy diagnostics** y compruebe el texto copiado.
-9. Confirme que Fill level, Side tilt, Tilt to mouth y Refill siguen funcionando.
-
-## Privacidad y alcance
-
-TiltSip 0.2.0 usa únicamente eventos relativos de orientación. No solicita orientación absoluta ni acceso al magnetómetro. Tampoco usa geolocalización, cámara, micrófono ni recopila o envía datos.
-
-Las rutas `./styles.css` y `./app.js` continúan siendo relativas para funcionar bajo `/tilt-sip/` en GitHub Pages.
-
-## Fuera del alcance de la fase 2
-
-El sensor no modifica el vaso, no consume líquido y no activa sonidos. La conexión entre orientación y simulación de bebida pertenece a una fase posterior.
+Estas listas describen las pruebas que debe realizar en dispositivos físicos; no sustituyen una comprobación real en su modelo concreto de iPhone o Android.

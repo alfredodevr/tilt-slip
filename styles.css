@@ -289,6 +289,7 @@ input:focus-visible {
 .text-button,
 .control-toggle,
 .motion-button,
+.calibrate-button,
 .copy-button {
   border: 0;
   background: none;
@@ -379,7 +380,7 @@ input:focus-visible {
   filter: drop-shadow(0 34px 28px rgba(0, 0, 0, 0.38));
   transform: perspective(900px) rotateX(var(--glass-pitch));
   transform-origin: center 12%;
-  transition: height 260ms ease, transform 180ms ease;
+  transition: height 260ms ease;
 }
 
 .glass {
@@ -420,7 +421,7 @@ input:focus-visible {
   opacity: 1;
   transform: rotate(var(--liquid-angle));
   transform-origin: 50% 0;
-  transition: top 190ms ease-out, transform 190ms ease-out, opacity 160ms ease;
+  transition: opacity 160ms ease;
   will-change: top, transform;
 }
 
@@ -452,7 +453,6 @@ input:focus-visible {
     inset 0 5px 5px rgba(255, 255, 255, 0.44);
   transform: scaleY(var(--surface-depth));
   transform-origin: 50% 50%;
-  transition: transform 190ms ease-out;
 }
 
 .foam {
@@ -598,6 +598,41 @@ input:focus-visible {
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
   gap: 8px;
   width: min(100%, 440px);
+}
+
+.calibration-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 440px);
+  padding: 9px 10px 9px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 16px;
+  background: rgba(var(--accent-rgb), 0.07);
+}
+
+.calibration-card p {
+  margin: 0;
+  color: #d9d6ce;
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.calibrate-button {
+  min-height: 35px;
+  padding: 0 13px;
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 999px;
+  color: #15130e;
+  background: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.calibrate-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .motion-button,
@@ -851,6 +886,72 @@ input:focus-visible {
   color: #717782;
   font-size: 0.57rem;
   line-height: 1.45;
+}
+
+.switch-control {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.switch-control > span {
+  display: grid;
+  gap: 2px;
+}
+
+.switch-control strong {
+  color: #c8c9ce;
+  font-size: 0.66rem;
+}
+
+.switch-control small {
+  color: #717782;
+  font-size: 0.55rem;
+  line-height: 1.35;
+}
+
+.switch-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-control i {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background 160ms ease;
+}
+
+.switch-control i::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f4efe5;
+  content: "";
+  transition: transform 160ms ease;
+}
+
+.switch-control input:checked + i {
+  background: var(--accent);
+}
+
+.switch-control input:checked + i::after {
+  transform: translateX(14px);
+}
+
+.switch-control input:focus-visible + i {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .version-label {

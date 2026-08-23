@@ -51,9 +51,9 @@
         </main>
 
         <footer class="chooser-footer">
-          <span>Phase two</span>
+          <span>Phase three</span>
           <span aria-hidden="true">•</span>
-          <span>Motion diagnostics</span>
+          <span>Calibrated motion</span>
         </footer>
       </section>
 
@@ -97,7 +97,7 @@
 
           <p class="level-status" aria-hidden="true">
             <span id="fillReadout">82%</span>
-            <span>full</span>
+            <span id="levelLabel">full</span>
           </p>
         </main>
 
@@ -116,6 +116,11 @@
             </button>
           </div>
 
+          <div class="calibration-card" id="calibrationCard" hidden>
+            <p id="calibrationPrompt">Hold your phone upright and tap Calibrate</p>
+            <button class="calibrate-button" id="calibrateButton" type="button">Calibrate</button>
+          </div>
+
           <p class="motion-message" id="motionMessage" data-tone="neutral">
             Motion is off. Manual controls remain available.
           </p>
@@ -127,7 +132,7 @@
               <span class="diagnostic-panel__kicker">Diagnostic mode</span>
               <strong>Controls &amp; sensor</strong>
             </div>
-            <span class="version-label">v0.2.0</span>
+            <span class="version-label">v0.3.0</span>
           </div>
 
           <div class="diagnostic-section">
@@ -167,7 +172,7 @@
             <div class="diagnostic-section__header">
               <div>
                 <strong>Orientation sensor</strong>
-                <span>Read-only in this phase</span>
+                <span>Calibrated motion simulation</span>
               </div>
               <button class="copy-button" id="copyDiagnosticsButton" type="button">Copy diagnostics</button>
             </div>
@@ -201,9 +206,42 @@
                 <dt>Events received</dt>
                 <dd id="eventCountValue">0</dd>
               </div>
+              <div>
+                <dt>Beta base</dt>
+                <dd id="betaBaseValue">—</dd>
+              </div>
+              <div>
+                <dt>Gamma base</dt>
+                <dd id="gammaBaseValue">—</dd>
+              </div>
+              <div>
+                <dt>Tilt to mouth</dt>
+                <dd id="calculatedMouthValue">0.00°</dd>
+              </div>
+              <div>
+                <dt>Side tilt</dt>
+                <dd id="calculatedSideValue">0.00°</dd>
+              </div>
+              <div>
+                <dt>Current level</dt>
+                <dd id="currentLevelValue">0.82</dd>
+              </div>
+              <div>
+                <dt>State</dt>
+                <dd id="simulationStateValue">ready</dd>
+              </div>
             </dl>
 
-            <p class="diagnostic-note">Sensor readings are diagnostic only. They do not change the drink level in version 0.2.0.</p>
+            <label class="switch-control" for="invertDirectionControl">
+              <span>
+                <strong>Invert drinking direction</strong>
+                <small>Use this if tilting toward your mouth produces the opposite value.</small>
+              </span>
+              <input id="invertDirectionControl" type="checkbox">
+              <i aria-hidden="true"></i>
+            </label>
+
+            <p class="diagnostic-note">After calibration, beta controls drinking and gamma controls the liquid surface. Manual controls remain available.</p>
           </div>
         </section>
 
