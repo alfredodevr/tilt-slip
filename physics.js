@@ -1,9 +1,9 @@
 const GEOMETRY_EPSILON = 1e-7;
 const AREA_SEARCH_STEPS = 52;
 
-export const SENSOR_TILT_LIMIT = 78;
-export const SENSOR_MAX_ENTER = 77.5;
-export const SENSOR_MAX_EXIT = 76.75;
+export const SENSOR_TILT_LIMIT = 85;
+export const SENSOR_MAX_ENTER = 84.5;
+export const SENSOR_MAX_EXIT = 83.75;
 
 export function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);

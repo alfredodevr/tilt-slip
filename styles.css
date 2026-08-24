@@ -1,24 +1,25 @@
 :root {
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page-bg: #080a0e;
-  --panel: rgba(17, 20, 26, 0.94);
-  --text: #f4f1ea;
-  --muted: #9297a1;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --page-bg: #05070a;
+  --panel: rgba(14, 17, 22, 0.96);
+  --text: #f5f2eb;
+  --muted: #8d929c;
   --line: rgba(255, 255, 255, 0.11);
   --accent: #d9a441;
   --accent-rgb: 217, 164, 65;
-  --liquid-top: #e7b54a;
-  --liquid-middle: #b96813;
-  --liquid-bottom: #613006;
-  --liquid-edge: #432004;
-  --liquid-transmitted: rgba(255, 202, 89, 0.42);
-  --liquid-highlight: rgba(255, 230, 157, 0.24);
-  --foam-color: #f4ead5;
-  --foam-shadow: #cbb994;
-  --foam-wet: rgba(219, 190, 139, 0.68);
-  --foam-highlight: rgba(255, 253, 245, 0.92);
-  --bubble-color: rgba(255, 239, 187, 0.7);
+  --liquid-top: #eab342;
+  --liquid-middle: #a6530b;
+  --liquid-bottom: #3a1802;
+  --liquid-edge: #210c01;
+  --liquid-transmitted: rgba(255, 207, 77, 0.58);
+  --liquid-highlight: rgba(255, 230, 145, 0.22);
+  --liquid-material-opacity: 0.42;
+  --foam-color: #f4ead8;
+  --foam-shadow: #a88759;
+  --foam-wet: rgba(188, 145, 88, 0.64);
+  --foam-highlight: rgba(255, 253, 245, 0.9);
+  --bubble-color: rgba(255, 239, 179, 0.68);
   --bubble-rise-x: 0px;
   --bubble-rise-y: -410px;
 }
@@ -73,20 +74,32 @@ input:focus-visible {
   overflow: hidden;
   isolation: isolate;
   background:
-    radial-gradient(ellipse at 50% 42%, rgba(var(--accent-rgb), 0.034), transparent 34%),
-    linear-gradient(158deg, #11151b 0%, #080a0e 56%, #030407 100%);
-  transition: background 400ms ease;
+    radial-gradient(circle at 50% 34%, rgba(var(--accent-rgb), 0.07), transparent 33%),
+    linear-gradient(155deg, #11151b 0%, #07090d 54%, #020305 100%);
 }
 
 .app::before {
   position: absolute;
   inset: 0;
-  z-index: -1;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px);
-  background-size: 100% 8px;
+  z-index: -2;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(90deg, transparent 49.9%, rgba(255, 255, 255, 0.022) 50%, transparent 50.1%);
+  background-size: 100% 9px, 100% 100%;
   content: "";
-  -webkit-mask-image: linear-gradient(to bottom, black, transparent 78%);
-  mask-image: linear-gradient(to bottom, black, transparent 78%);
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent 84%);
+  mask-image: linear-gradient(to bottom, black, transparent 84%);
+}
+
+.app::after {
+  position: absolute;
+  inset: auto -20vw -38vh;
+  z-index: -1;
+  height: 62vh;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(var(--accent-rgb), 0.045), transparent 62%);
+  content: "";
   pointer-events: none;
 }
 
@@ -95,17 +108,17 @@ input:focus-visible {
   inset: 0;
   min-width: 0;
   min-height: 0;
-  padding-top: max(18px, env(safe-area-inset-top));
-  padding-right: max(18px, env(safe-area-inset-right));
-  padding-bottom: max(14px, env(safe-area-inset-bottom));
-  padding-left: max(18px, env(safe-area-inset-left));
+  padding-top: max(14px, env(safe-area-inset-top));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left));
 }
 
 .chooser-screen {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 16px;
-  max-width: 920px;
+  gap: 14px;
+  max-width: 960px;
   margin: 0 auto;
 }
 
@@ -114,54 +127,64 @@ input:focus-visible {
   align-items: center;
   gap: 10px;
   width: fit-content;
-  letter-spacing: -0.02em;
 }
 
-.brand-lockup__dot {
-  width: 11px;
-  height: 11px;
-  border: 2px solid #f4f0e8;
-  border-radius: 50%;
-  box-shadow: inset 0 -4px 0 var(--accent);
+.brand-lockup__mark {
+  position: relative;
+  display: grid;
+  width: 15px;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 3px 3px 6px 6px;
+  place-items: end center;
+  clip-path: polygon(6% 0, 94% 0, 82% 100%, 18% 100%);
+}
+
+.brand-lockup__mark i {
+  width: 100%;
+  height: 54%;
+  background: var(--accent);
+  box-shadow: 0 -2px 5px rgba(var(--accent-rgb), 0.42);
 }
 
 .brand-lockup__name {
-  font-size: 0.98rem;
-  font-weight: 750;
+  font-size: 0.88rem;
+  font-weight: 780;
+  letter-spacing: 0.01em;
 }
 
 .chooser-content {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  width: 100%;
-  max-width: 720px;
+  width: min(100%, 760px);
   margin: 0 auto;
 }
 
 .eyebrow {
   margin: 0 0 10px;
   color: var(--accent);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 800;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.17em;
   text-transform: uppercase;
 }
 
 .chooser-content h1 {
-  max-width: 640px;
+  max-width: 700px;
   margin: 0;
-  font-size: clamp(2.35rem, 11vw, 5.5rem);
-  font-weight: 650;
-  letter-spacing: -0.065em;
-  line-height: 0.92;
+  font-size: clamp(2.55rem, 12vw, 6rem);
+  font-weight: 620;
+  letter-spacing: -0.07em;
+  line-height: 0.9;
 }
 
 .chooser-intro {
-  max-width: 430px;
-  margin: 18px 0 24px;
+  max-width: 480px;
+  margin: 18px 0 25px;
   color: var(--muted);
-  font-size: clamp(0.92rem, 2.5vw, 1.05rem);
+  font-size: clamp(0.88rem, 2.8vw, 1.04rem);
   line-height: 1.5;
 }
 
@@ -172,15 +195,15 @@ input:focus-visible {
 
 .drink-card {
   display: grid;
-  grid-template-columns: auto 46px 1fr auto;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 13px;
+  gap: 14px;
   width: 100%;
-  min-height: 82px;
-  padding: 12px 16px;
+  min-height: 88px;
+  padding: 12px 15px;
   border: 1px solid var(--line);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.045);
+  border-radius: 23px;
+  background: rgba(255, 255, 255, 0.043);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
   cursor: pointer;
   text-align: left;
@@ -188,8 +211,8 @@ input:focus-visible {
 }
 
 .drink-card:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.23);
+  background: rgba(255, 255, 255, 0.07);
   transform: translateY(-2px);
 }
 
@@ -197,48 +220,53 @@ input:focus-visible {
   transform: scale(0.985);
 }
 
-.drink-card__number {
-  color: #6f747e;
-  font-size: 0.66rem;
-  font-weight: 750;
-  letter-spacing: 0.08em;
-}
-
-.drink-card__swatch {
+.drink-card__visual {
   position: relative;
   display: block;
-  width: 42px;
-  height: 54px;
+  width: 45px;
+  height: 62px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 9px 9px 13px 13px;
-  background:
-    linear-gradient(100deg, rgba(255, 255, 255, 0.2), transparent 26%),
-    linear-gradient(155deg, #dca83e, #653106);
-  box-shadow: inset 5px 0 10px rgba(255, 255, 255, 0.1);
-  clip-path: polygon(5% 0, 95% 0, 85% 100%, 15% 100%);
+  border: 1px solid rgba(230, 241, 246, 0.35);
+  border-radius: 7px 7px 12px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow:
+    inset 6px 0 9px rgba(255, 255, 255, 0.12),
+    0 10px 18px rgba(0, 0, 0, 0.24);
+  clip-path: polygon(5% 0, 95% 0, 84% 100%, 16% 100%);
 }
 
-.drink-card--cola .drink-card__swatch {
-  background:
-    linear-gradient(100deg, rgba(220, 104, 74, 0.2), transparent 28%),
-    linear-gradient(155deg, #64251b, #1c0c09 55%, #050303);
-}
-
-.drink-card__foam {
+.drink-card__liquid {
   position: absolute;
-  top: 0;
+  inset: 7px 0 0;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 232, 148, 0.45), transparent 24%),
+    linear-gradient(145deg, #e2a62f, #a04c08 57%, #391701);
+}
+
+.drink-card--cola .drink-card__liquid {
+  background:
+    radial-gradient(circle at 28% 23%, rgba(202, 74, 39, 0.34), transparent 25%),
+    linear-gradient(145deg, #672214, #160805 56%, #020101);
+}
+
+.drink-card__head {
+  position: absolute;
+  top: 5px;
   left: -8%;
   width: 116%;
-  height: 11px;
+  height: 12px;
   border-radius: 50%;
-  background: #efe4cf;
-  box-shadow: 0 3px 7px rgba(58, 31, 4, 0.25);
+  background:
+    radial-gradient(circle at 25% 45%, #fff 0 1px, transparent 1.5px),
+    radial-gradient(circle at 65% 28%, #fff 0 1.5px, transparent 2px),
+    #eee3ce;
+  box-shadow: 0 4px 7px rgba(46, 22, 2, 0.22);
 }
 
-.drink-card--cola .drink-card__foam {
+.drink-card--cola .drink-card__head {
+  top: 6px;
   height: 7px;
-  background: #c49b75;
+  background: #bd8f69;
 }
 
 .drink-card__copy {
@@ -246,24 +274,34 @@ input:focus-visible {
   gap: 3px;
 }
 
+.drink-card__index {
+  color: #696f79;
+  font-size: 0.56rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
 .drink-card__copy strong {
   font-size: 1.12rem;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 .drink-card__copy small {
+  overflow: hidden;
   color: var(--muted);
-  font-size: 0.73rem;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drink-card__arrow {
-  color: #c2c5cb;
-  font-size: 1.35rem;
+  color: #c1c4ca;
+  font-size: 1.28rem;
   transition: transform 180ms ease;
 }
 
 .drink-card:hover .drink-card__arrow {
-  transform: translateX(3px);
+  transform: translate(2px, -2px);
 }
 
 .chooser-footer {
@@ -271,15 +309,15 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #696f79;
-  font-size: 0.68rem;
+  color: #666c76;
+  font-size: 0.61rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .drink-screen {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 7px;
 }
 
@@ -289,7 +327,7 @@ input:focus-visible {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  min-height: 48px;
+  min-height: 46px;
 }
 
 .text-button,
@@ -304,28 +342,24 @@ input:focus-visible {
 }
 
 .text-button {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0;
   color: #bec2ca;
-  font-size: 0.8rem;
-  font-weight: 650;
+  font-size: 0.77rem;
+  font-weight: 680;
 }
 
 .text-button--back {
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: 7px;
-}
-
-.text-button--back span:first-child {
-  font-size: 1.05rem;
+  gap: 6px;
 }
 
 .text-button--refill {
   justify-self: end;
   padding: 0 14px;
-  border: 1px solid rgba(var(--accent-rgb), 0.34);
+  border: 1px solid rgba(var(--accent-rgb), 0.36);
   border-radius: 999px;
   color: var(--text);
   background: rgba(var(--accent-rgb), 0.075);
@@ -343,17 +377,17 @@ input:focus-visible {
 
 .drink-title span {
   margin-bottom: 4px;
-  color: #727781;
-  font-size: 0.57rem;
+  color: #717680;
+  font-size: 0.54rem;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.17em;
   text-transform: uppercase;
 }
 
 .drink-title h2 {
   margin: 0;
   font-size: 1.02rem;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
 }
 
 .glass-area {
@@ -361,19 +395,36 @@ input:focus-visible {
   display: grid;
   min-height: 0;
   overflow: hidden;
+  padding: 1px 0 9px;
   place-items: center;
-  padding: 0 0 17px;
+}
+
+.studio-light {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  width: min(86vw, 520px);
+  aspect-ratio: 1;
+  border: 1px solid rgba(var(--accent-rgb), 0.11);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.065), transparent 65%);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .glass-wrap {
   position: relative;
   z-index: 2;
-  width: min(92vw, 38vh, 390px);
-  width: min(92vw, 38dvh, 390px);
-  max-height: 100%;
+  height: 100%;
+  max-height: 590px;
+  width: auto;
+  max-width: calc(100vw - max(24px, env(safe-area-inset-left)) - max(24px, env(safe-area-inset-right)));
   aspect-ratio: 380 / 620;
-  filter: drop-shadow(0 27px 25px rgba(0, 0, 0, 0.48));
-  transition: width 240ms ease;
+  filter: drop-shadow(0 28px 30px rgba(0, 0, 0, 0.52));
+}
+
+.app[data-drink="beer"] .glass-wrap {
+  aspect-ratio: 430 / 620;
 }
 
 .glass-svg {
@@ -383,101 +434,64 @@ input:focus-visible {
   overflow: visible;
 }
 
-.glass-body-back {
-  fill: url(#glassBodyGradient);
-  stroke: rgba(218, 235, 243, 0.32);
-  stroke-width: 1.15;
-  vector-effect: non-scaling-stroke;
+.glass-ambient-shadow {
+  fill: rgba(0, 0, 0, 0.7);
+  filter: blur(9px);
 }
 
-.glass-wall-overlay {
-  fill: url(#glassWallGradient);
-  stroke: rgba(236, 246, 250, 0.16);
+.glass-photo {
+  pointer-events: none;
+}
+
+.glass-photo--back {
+  opacity: 0.33;
+  filter: saturate(0.72) brightness(0.76);
+}
+
+.glass-photo--front {
+  opacity: 0.9;
+  filter: contrast(1.02) brightness(1.03);
+}
+
+.app[data-drink="beer"] .glass-photo--front {
+  opacity: 0.94;
+}
+
+.cavity-outline {
+  fill: none;
+  stroke: rgba(222, 239, 246, 0.12);
   stroke-width: 1;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
 }
 
-.glass-edge-overlay {
-  fill: none;
-  stroke: rgba(161, 191, 204, 0.27);
-  stroke-width: 7;
-  opacity: 0.28;
-  pointer-events: none;
-  vector-effect: non-scaling-stroke;
-}
-
-.cavity-outline {
-  fill: none;
-  stroke: rgba(220, 237, 244, 0.14);
-  stroke-width: 1.1;
-  pointer-events: none;
-  vector-effect: non-scaling-stroke;
-}
-
-.glass-handle__shadow,
-.glass-handle__outer,
-.glass-handle__inner,
-.glass-handle__highlight {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.glass-handle__shadow {
-  stroke: rgba(0, 0, 0, 0.42);
-  stroke-width: 38;
-  transform: translate(3px, 5px);
-}
-
-.glass-handle__outer {
-  stroke: rgba(166, 196, 208, 0.31);
-  stroke-width: 32;
-}
-
-.glass-handle__inner {
-  stroke: rgba(7, 10, 13, 0.7);
-  stroke-width: 18;
-}
-
-.glass-handle__highlight {
-  stroke: rgba(240, 249, 252, 0.25);
-  stroke-width: 4.2;
-  transform: translate(-5px, -2px);
-}
-
-.glass-ground-shadow {
-  fill: rgba(0, 0, 0, 0.58);
-  opacity: 0.72;
-}
-
 .glass-rim {
-  fill: rgba(219, 235, 242, 0.055);
+  fill: rgba(219, 235, 242, 0.025);
   pointer-events: none;
   vector-effect: non-scaling-stroke;
 }
 
 .glass-rim--outer {
-  stroke: rgba(233, 245, 250, 0.48);
-  stroke-width: 1.5;
+  stroke: rgba(238, 248, 251, 0.38);
+  stroke-width: 1.25;
 }
 
 .glass-rim--inner {
-  stroke: rgba(158, 184, 197, 0.23);
-  stroke-width: 1;
+  stroke: rgba(167, 194, 204, 0.19);
+  stroke-width: 0.85;
 }
 
 .glass-base {
-  fill: rgba(209, 228, 237, 0.1);
-  stroke: rgba(226, 240, 246, 0.3);
-  stroke-width: 1.2;
+  fill: rgba(209, 228, 237, 0.055);
+  stroke: rgba(226, 240, 246, 0.24);
+  stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .glass-base-highlight {
-  fill: rgba(232, 246, 251, 0.06);
-  stroke: rgba(246, 252, 254, 0.26);
-  stroke-width: 0.8;
+  fill: rgba(238, 248, 251, 0.04);
+  stroke: rgba(246, 252, 254, 0.19);
+  stroke-width: 0.75;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
 }
@@ -486,59 +500,67 @@ input:focus-visible {
   fill: none;
   stroke-linecap: round;
   pointer-events: none;
+  mix-blend-mode: screen;
 }
 
 .glass-reflection--primary {
-  stroke: rgba(255, 255, 255, 0.25);
-  stroke-width: 6;
+  stroke: rgba(255, 255, 255, 0.27);
+  stroke-width: 6.5;
   opacity: 0.48;
 }
 
 .glass-reflection--secondary {
-  stroke: rgba(255, 255, 255, 0.11);
-  stroke-width: 2.5;
-  opacity: 0.55;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2.4;
+  opacity: 0.5;
 }
 
 .glass-reflection--edge {
-  stroke: rgba(204, 228, 238, 0.18);
-  stroke-width: 3.5;
-  opacity: 0.52;
+  stroke: rgba(205, 230, 239, 0.18);
+  stroke-width: 3.2;
+  opacity: 0.48;
 }
 
 .liquid-stop--edge { stop-color: var(--liquid-edge); }
 .liquid-stop--top { stop-color: var(--liquid-top); }
 .liquid-stop--middle { stop-color: var(--liquid-middle); }
 .liquid-stop--bottom { stop-color: var(--liquid-bottom); }
-.liquid-light-stop { stop-color: var(--liquid-transmitted); }
-.liquid-edge-stop { stop-color: var(--liquid-edge); stop-opacity: 0.72; }
-.foam-stop--top { stop-color: var(--foam-color); }
-.foam-stop--middle { stop-color: var(--foam-color); stop-opacity: 0.9; }
+.liquid-transmission-stop { stop-color: var(--liquid-transmitted); }
+.liquid-edge-stop { stop-color: var(--liquid-edge); stop-opacity: 0.9; }
+.foam-stop--top { stop-color: var(--foam-highlight); }
+.foam-stop--middle { stop-color: var(--foam-color); stop-opacity: 0.94; }
 .foam-stop--bottom { stop-color: var(--foam-shadow); }
-.foam-wet-stop--top { stop-color: var(--foam-wet); stop-opacity: 0.5; }
+.foam-wet-stop--top { stop-color: var(--foam-wet); stop-opacity: 0.48; }
 .foam-wet-stop--bottom { stop-color: var(--foam-wet); }
 .foam-top-stop { stop-color: var(--foam-highlight); }
 
-.liquid-shape {
-  fill: url(#liquidGradient);
+.liquid-layer--base {
+  fill: url(#liquidBaseGradient);
+  opacity: 0.98;
 }
 
-.liquid-depth {
-  fill: url(#liquidDepthGradient);
-  opacity: 0.72;
+.liquid-material {
+  opacity: var(--liquid-material-opacity);
+  mix-blend-mode: soft-light;
   pointer-events: none;
 }
 
-.liquid-light {
-  fill: url(#liquidLightGradient);
+.liquid-layer--transmission {
+  fill: url(#liquidTransmissionGradient);
+  opacity: 0.88;
   mix-blend-mode: screen;
-  opacity: 0.68;
   pointer-events: none;
 }
 
-.liquid-edge {
+.liquid-layer--depth {
+  fill: url(#liquidDepthGradient);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.liquid-layer--edge {
   fill: url(#liquidEdgeGradient);
-  opacity: 0.52;
+  opacity: 0.66;
   pointer-events: none;
 }
 
@@ -555,70 +577,56 @@ input:focus-visible {
   fill: var(--liquid-edge);
 }
 
-.foam-shape {
+.foam-material {
   pointer-events: none;
 }
 
 .foam-shape--body {
   fill: url(#foamBodyGradient);
-  opacity: 0.82;
+  opacity: 0.74;
 }
 
 .foam-shape--wet {
   fill: url(#foamWetGradient);
-  opacity: 0.8;
+  opacity: 0.72;
 }
 
 .foam-shape--top {
   fill: url(#foamTopGradient);
-  opacity: 0.72;
+  opacity: 0.52;
 }
 
 .foam-cell {
   fill: var(--foam-color);
-  stroke: rgba(91, 60, 28, 0.19);
+  stroke: rgba(72, 45, 24, 0.21);
   stroke-width: 0.42;
   opacity: var(--foam-cell-opacity, 0.8);
 }
 
-.foam-cell--surface {
-  fill: var(--foam-highlight);
-  stroke: rgba(109, 76, 40, 0.22);
-}
-
-.foam-cell--wet {
-  fill: var(--foam-wet);
-  opacity: 0.62;
-}
-
-.foam-cell--micro {
-  stroke-width: 0.3;
-}
-
-.foam-cell--large {
-  fill-opacity: 0.72;
-  stroke-width: 0.65;
-}
+.foam-cell--surface { fill: var(--foam-highlight); }
+.foam-cell--wet { fill: var(--foam-wet); opacity: 0.66; }
+.foam-cell--micro { stroke-width: 0.28; }
+.foam-cell--large { fill-opacity: 0.76; stroke-width: 0.62; }
 
 .meniscus {
   fill: none;
-  stroke: rgba(255, 247, 223, 0.34);
+  stroke: rgba(255, 247, 223, 0.36);
   stroke-linecap: round;
-  stroke-width: 1.1;
+  stroke-width: 1;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
 }
 
 .meniscus--shadow {
-  stroke: rgba(55, 27, 6, 0.34);
-  stroke-width: 3.1;
-  opacity: 0.45;
+  stroke: rgba(30, 10, 2, 0.42);
+  stroke-width: 3;
+  opacity: 0.5;
 }
 
 .condensation-drop {
-  fill: rgba(226, 243, 249, 0.14);
-  stroke: rgba(252, 255, 255, 0.44);
-  stroke-width: 0.45;
+  fill: rgba(226, 243, 249, 0.13);
+  stroke: rgba(252, 255, 255, 0.36);
+  stroke-width: 0.42;
   opacity: var(--drop-opacity, 0.16);
   pointer-events: none;
 }
@@ -626,7 +634,7 @@ input:focus-visible {
 .bubble {
   fill: none;
   stroke: var(--bubble-color);
-  stroke-width: 0.72;
+  stroke-width: 0.7;
   opacity: 0;
   animation: bubble-rise var(--bubble-speed) linear var(--bubble-delay) infinite;
   transform-box: fill-box;
@@ -634,16 +642,11 @@ input:focus-visible {
   will-change: transform, opacity;
 }
 
-.bubble--far {
-  filter: url(#bubbleDepthBlur);
-  stroke-width: 0.55;
-}
+.bubble--far { stroke-width: 0.48; }
+.bubble--near { stroke-width: 0.95; }
 
-.bubble--near {
-  stroke-width: 1;
-}
-
-.app.is-background .bubble {
+.app.is-background .bubble,
+.app[data-physics-state="empty"] .bubble {
   animation-play-state: paused;
   opacity: 0;
 }
@@ -651,14 +654,17 @@ input:focus-visible {
 @keyframes bubble-rise {
   0% {
     opacity: 0;
-    transform: translate3d(0, 18px, 0) scale(0.72);
+    transform: translate3d(0, 15px, 0) scale(0.72);
   }
+
   15% {
     opacity: var(--bubble-opacity, 0.5);
   }
+
   76% {
     opacity: var(--bubble-opacity-fade, 0.36);
   }
+
   100% {
     opacity: 0;
     transform: translate3d(
@@ -672,22 +678,22 @@ input:focus-visible {
 .level-status {
   position: absolute;
   z-index: 4;
-  right: max(3px, calc(50% - min(47vw, 230px)));
+  right: max(2px, calc(50% - min(46vw, 220px)));
   bottom: 4px;
   display: grid;
   justify-items: end;
   margin: 0;
   color: var(--muted);
-  font-size: 0.57rem;
-  font-weight: 700;
+  font-size: 0.55rem;
+  font-weight: 750;
   letter-spacing: 0.13em;
-  line-height: 1.15;
+  line-height: 1.1;
   text-transform: uppercase;
 }
 
 .app[data-drink="beer"] .level-status {
   right: auto;
-  left: max(3px, calc(50% - min(47vw, 230px)));
+  left: max(2px, calc(50% - min(46vw, 220px)));
   justify-items: start;
 }
 
@@ -700,53 +706,16 @@ input:focus-visible {
 .drink-actions {
   position: relative;
   z-index: 20;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
 }
 
 .drink-actions__buttons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  width: min(100%, 440px);
-}
-
-.calibration-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  width: min(100%, 440px);
-  padding: 9px 10px 9px 14px;
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-  border-radius: 16px;
-  background: rgba(var(--accent-rgb), 0.065);
-}
-
-.calibration-card p {
-  margin: 0;
-  color: #d6d3cb;
-  font-size: 0.66rem;
-  line-height: 1.35;
-}
-
-.calibrate-button {
-  min-height: 35px;
-  padding: 0 13px;
-  border: 1px solid rgba(var(--accent-rgb), 0.5);
-  border-radius: 999px;
-  color: #15130e;
-  background: var(--accent);
-  font-size: 0.65rem;
-  font-weight: 800;
-}
-
-.calibrate-button:disabled {
-  cursor: wait;
-  opacity: 0.62;
+  width: min(100%, 470px);
 }
 
 .motion-button,
@@ -755,33 +724,31 @@ input:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
-  min-height: 45px;
-  padding: 0 12px;
+  min-height: 46px;
+  padding: 0 11px;
   border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.7rem;
+  font-weight: 760;
   line-height: 1.1;
 }
 
 .motion-button {
   grid-column: 1 / -1;
-  border: 1px solid rgba(var(--accent-rgb), 0.64);
-  color: #15130e;
+  border: 1px solid rgba(var(--accent-rgb), 0.66);
+  color: #12120f;
   background: var(--accent);
-  box-shadow: 0 8px 22px rgba(var(--accent-rgb), 0.13);
+  box-shadow: 0 9px 26px rgba(var(--accent-rgb), 0.14);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
 .motion-button:hover {
-  box-shadow: 0 10px 28px rgba(var(--accent-rgb), 0.22);
+  box-shadow: 0 12px 30px rgba(var(--accent-rgb), 0.22);
   transform: translateY(-1px);
 }
 
-.motion-button:active {
-  transform: scale(0.98);
-}
+.motion-button:active { transform: scale(0.985); }
 
 .motion-button[aria-pressed="true"] {
   color: var(--text);
@@ -808,19 +775,18 @@ input:focus-visible {
 .action-button:active,
 .control-toggle:hover,
 .control-toggle[aria-expanded="true"] {
-  border-color: rgba(var(--accent-rgb), 0.34);
+  border-color: rgba(var(--accent-rgb), 0.38);
   color: #fff;
-  background: rgba(var(--accent-rgb), 0.075);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .action-button__icon {
   color: var(--accent);
   font-size: 0.9rem;
-  line-height: 1;
 }
 
 .sound-button[aria-pressed="true"] {
-  color: #969aa3;
+  color: #959aa3;
   background: rgba(255, 255, 255, 0.022);
 }
 
@@ -842,12 +808,47 @@ input:focus-visible {
 .control-toggle__bars i:nth-child(2) { height: 12px; }
 .control-toggle__bars i:nth-child(3) { height: 9px; }
 
+.calibration-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 470px);
+  padding: 9px 10px 9px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: 16px;
+  background: rgba(var(--accent-rgb), 0.065);
+}
+
+.calibration-card p {
+  margin: 0;
+  color: #d6d3cb;
+  font-size: 0.65rem;
+  line-height: 1.35;
+}
+
+.calibrate-button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 999px;
+  color: #15130e;
+  background: var(--accent);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.calibrate-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .motion-message {
   min-height: 16px;
-  max-width: 470px;
+  max-width: 500px;
   margin: 0;
   color: #7f848e;
-  font-size: 0.63rem;
+  font-size: 0.61rem;
   line-height: 1.35;
   text-align: center;
 }
@@ -857,23 +858,22 @@ input:focus-visible {
 .motion-message[data-tone="error"] { color: #e99b88; }
 
 .diagnostic-panel {
-  position: relative;
-  z-index: 30;
+  position: absolute;
+  z-index: 40;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: max(10px, env(safe-area-inset-left));
   display: grid;
   gap: 11px;
-  width: 100%;
-  max-width: 540px;
-  max-height: min(57vh, 610px);
-  max-height: min(57dvh, 610px);
-  margin: 4px auto 0;
-  padding: 14px 15px 15px;
+  max-height: calc(100dvh - max(20px, env(safe-area-inset-top)) - max(20px, env(safe-area-inset-bottom)));
+  padding: 15px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
   background: var(--panel);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 24px 65px rgba(0, 0, 0, 0.56);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   overscroll-behavior: contain;
   scrollbar-color: rgba(var(--accent-rgb), 0.4) transparent;
   scrollbar-width: thin;
@@ -893,14 +893,12 @@ input:focus-visible {
   gap: 2px;
 }
 
-.diagnostic-panel__header strong {
-  font-size: 0.82rem;
-}
+.diagnostic-panel__header strong { font-size: 0.83rem; }
 
 .diagnostic-panel__kicker {
   color: var(--accent);
   font-size: 0.54rem;
-  font-weight: 800;
+  font-weight: 820;
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
@@ -917,14 +915,8 @@ input:focus-visible {
   gap: 12px;
 }
 
-.diagnostic-section__header strong {
-  font-size: 0.72rem;
-}
-
-.diagnostic-section__header span {
-  color: #737984;
-  font-size: 0.56rem;
-}
+.diagnostic-section__header strong { font-size: 0.72rem; }
+.diagnostic-section__header span { color: #737984; font-size: 0.56rem; }
 
 .diagnostic-divider {
   height: 1px;
@@ -933,18 +925,14 @@ input:focus-visible {
 
 .copy-button {
   flex: 0 0 auto;
-  min-height: 31px;
-  padding: 0 10px;
-  border: 1px solid rgba(var(--accent-rgb), 0.26);
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
   border-radius: 999px;
   color: var(--text);
-  background: rgba(var(--accent-rgb), 0.065);
-  font-size: 0.59rem;
-  font-weight: 700;
-}
-
-.copy-button:hover {
-  border-color: rgba(var(--accent-rgb), 0.48);
+  background: rgba(var(--accent-rgb), 0.07);
+  font-size: 0.58rem;
+  font-weight: 750;
 }
 
 .diagnostic-grid {
@@ -960,20 +948,20 @@ input:focus-visible {
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid rgba(255, 255, 255, 0.065);
-  border-radius: 10px;
+  border-radius: 11px;
   background: rgba(255, 255, 255, 0.028);
 }
 
 .diagnostic-grid > .diagnostic-grid__wide {
   grid-column: 1 / -1;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
 }
 
 .diagnostic-grid dt {
   color: #777d88;
-  font-size: 0.52rem;
-  font-weight: 700;
+  font-size: 0.51rem;
+  font-weight: 730;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -984,7 +972,7 @@ input:focus-visible {
   overflow: hidden;
   color: #e2ded6;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.64rem;
+  font-size: 0.63rem;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1003,8 +991,8 @@ input:focus-visible {
 .diagnostic-note {
   margin: 0;
   color: #717782;
-  font-size: 0.57rem;
-  line-height: 1.45;
+  font-size: 0.56rem;
+  line-height: 1.5;
 }
 
 .version-label {
@@ -1013,7 +1001,7 @@ input:focus-visible {
   border-radius: 7px;
   color: #858a94;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.59rem;
+  font-size: 0.58rem;
 }
 
 .range-control {
@@ -1023,8 +1011,8 @@ input:focus-visible {
 
 .range-control label {
   color: #bec1c8;
-  font-size: 0.68rem;
-  font-weight: 650;
+  font-size: 0.67rem;
+  font-weight: 680;
 }
 
 .range-control output {
@@ -1034,7 +1022,7 @@ input:focus-visible {
 
 input[type="range"] {
   width: 100%;
-  height: 22px;
+  height: 28px;
   margin: 0;
   appearance: none;
   -webkit-appearance: none;
@@ -1050,9 +1038,9 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 
 input[type="range"]::-webkit-slider-thumb {
-  width: 17px;
-  height: 17px;
-  margin-top: -7px;
+  width: 19px;
+  height: 19px;
+  margin-top: -8px;
   appearance: none;
   -webkit-appearance: none;
   border: 2px solid #13161d;
@@ -1074,8 +1062,8 @@ input[type="range"]::-moz-range-progress {
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   border: 2px solid #13161d;
   border-radius: 50%;
   background: var(--accent);
@@ -1088,20 +1076,15 @@ input[type="range"]::-moz-range-thumb {
   padding: 0;
   margin: -1px;
   overflow: hidden;
+  border: 0;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
-  border: 0;
-}
-
-.drink-screen.controls-open .glass-wrap {
-  width: min(72vw, 24vh, 250px);
-  width: min(72vw, 24dvh, 250px);
 }
 
 @media (min-width: 620px) {
   .screen {
-    padding-right: max(28px, env(safe-area-inset-right));
-    padding-left: max(28px, env(safe-area-inset-left));
+    padding-right: max(26px, env(safe-area-inset-right));
+    padding-left: max(26px, env(safe-area-inset-left));
   }
 
   .drink-options {
@@ -1109,56 +1092,86 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .drink-card {
-    min-height: 112px;
-  }
-}
-
-@media (min-width: 800px) {
-  .drink-screen {
-    padding-bottom: max(22px, env(safe-area-inset-bottom));
-  }
-
-  .diagnostic-panel {
-    position: absolute;
-    right: max(24px, env(safe-area-inset-right));
-    bottom: max(24px, env(safe-area-inset-bottom));
-    width: 400px;
-    max-height: calc(100vh - 48px);
-    max-height: calc(100dvh - 48px);
-    margin: 0;
-  }
-
-  .drink-screen.controls-open .glass-wrap {
-    width: min(43vw, 38vh, 390px);
-    width: min(43vw, 38dvh, 390px);
-  }
-}
-
-@media (max-height: 650px) {
-  .chooser-intro {
-    margin: 12px 0 14px;
-  }
-
-  .drink-card {
-    min-height: 70px;
+    min-height: 116px;
   }
 
   .glass-wrap {
-    width: min(88vw, 34vh, 330px);
-    width: min(88vw, 34dvh, 330px);
+    max-width: 520px;
+  }
+}
+
+@media (min-width: 860px) {
+  .drink-screen {
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
   }
 
   .diagnostic-panel {
-    gap: 7px;
-    max-height: 55vh;
-    max-height: 55dvh;
-    padding-top: 10px;
-    padding-bottom: 10px;
+    top: max(14px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: auto;
+    width: min(430px, 42vw);
+    max-height: none;
+  }
+
+  .drink-screen.controls-open .glass-area,
+  .drink-screen.controls-open .drink-header,
+  .drink-screen.controls-open .drink-actions {
+    margin-right: min(440px, 43vw);
   }
 
   .drink-screen.controls-open .glass-wrap {
-    width: min(66vw, 20vh, 215px);
-    width: min(66vw, 20dvh, 215px);
+    max-width: calc(57vw - 50px);
+  }
+}
+
+@media (max-height: 690px) {
+  .screen {
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
+  }
+
+  .chooser-intro {
+    margin: 11px 0 13px;
+  }
+
+  .drink-card {
+    min-height: 72px;
+  }
+
+  .drink-header {
+    min-height: 38px;
+  }
+
+  .text-button {
+    min-height: 38px;
+  }
+
+  .motion-button,
+  .action-button,
+  .control-toggle {
+    min-height: 40px;
+  }
+
+  .motion-message {
+    display: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .glass-wrap {
+    max-height: 78%;
+  }
+
+  .drink-actions {
+    position: absolute;
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: min(340px, 44vw);
+  }
+
+  .glass-area {
+    margin-right: min(350px, 45vw);
   }
 }
 
@@ -1174,7 +1187,7 @@ input[type="range"]::-moz-range-thumb {
 
   .bubble {
     animation: none !important;
-    opacity: 0.14;
+    opacity: 0.12;
     transform: none;
   }
 }

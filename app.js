@@ -1,6 +1,6 @@
 "use strict";
 
-import { DRINKS, GLASS_GEOMETRIES } from "./config.js";
+import { AUDIO_ASSETS, DRINKS, GLASS_GEOMETRIES } from "./config.js";
 import {
   capacityAtAngle,
   clamp,
@@ -15,7 +15,7 @@ import {
   thresholdForAreaFraction
 } from "./physics.js";
 
-const APP_VERSION = "2.0.0-rc.1";
+const APP_VERSION = "2.0.0-rc.2";
 const SENSOR_TIMEOUT_MS = 5000;
 const CALIBRATION_DURATION_MS = 550;
 const MIN_CALIBRATION_SAMPLES = 4;
@@ -23,10 +23,12 @@ const MAX_SIDE_DEGREES = SENSOR_TILT_LIMIT;
 const SMOOTHING_RESPONSE = 16;
 const REFILL_RATE = 1.35;
 const DIAGNOSTIC_INTERVAL_MS = 100;
-const AMBIENT_TILT_LIMIT = 8;
+const UPRIGHT_ENTER_DEGREES = 4;
+const UPRIGHT_EXIT_DEGREES = 7;
 const CHUG_ENTER_DEGREES = 66;
 const CHUG_EXIT_DEGREES = 63;
 const FLOW_AUDIO_EPSILON = 0.00035;
+const BUBBLE_RATE_PER_SECOND = 4 / 5.5;
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 const simulationState = {
@@ -72,13 +74,33 @@ const sensorState = {
 const audioState = {
   context: null,
   masterGain: null,
-  noiseBuffer: null,
+  buffers: {
+    bubble: [],
+    sipping: [],
+    chugging: [],
+    refill: []
+  },
+  assetsLoading: false,
+  assetsReady: false,
   activeSources: new Map(),
   ambientTimerId: null,
-  nextConsumptionEventAt: 0,
+  bubbleSource: null,
+  humanSource: null,
   eventSequence: 0,
   mode: "not-started",
   consumptionMode: "sipping",
+  uprightLatched: true,
+  bubblesScheduled: 0,
+  bubblesPlayed: 0,
+  bubbleObservationStartedAt: null,
+  bubbleObservationPlayedBase: 0,
+  currentHumanSample: "none",
+  lastSampleIndex: {
+    bubble: -1,
+    sipping: -1,
+    chugging: -1,
+    refill: -1
+  },
   interacted: false,
   muted: false,
   unavailable: false
@@ -98,14 +120,9 @@ const elements = {
   currentDrinkName: document.querySelector("#currentDrinkName"),
   glassWrap: document.querySelector("#glassWrap"),
   glassSvg: document.querySelector("#glassSvg"),
-  glassHandleGroup: document.querySelector("#glassHandleGroup"),
-  glassHandleShadow: document.querySelector("#glassHandleShadow"),
-  glassHandleOuter: document.querySelector("#glassHandleOuter"),
-  glassHandleInner: document.querySelector("#glassHandleInner"),
-  glassHandleHighlight: document.querySelector("#glassHandleHighlight"),
-  glassOuterPath: document.querySelector("#glassOuterPath"),
-  glassWallOverlay: document.querySelector("#glassWallOverlay"),
-  glassEdgeOverlay: document.querySelector("#glassEdgeOverlay"),
+  glassPhotoBack: document.querySelector("#glassPhotoBack"),
+  glassPhotoFront: document.querySelector("#glassPhotoFront"),
+  glassAmbientShadow: document.querySelector("#glassAmbientShadow"),
   cavityClipPath: document.querySelector("#cavityClipPath"),
   cavityOutline: document.querySelector("#cavityOutline"),
   liquidShape: document.querySelector("#liquidShape"),
@@ -113,7 +130,9 @@ const elements = {
   liquidLight: document.querySelector("#liquidLight"),
   liquidEdge: document.querySelector("#liquidEdge"),
   liquidTexture: document.querySelector("#liquidTexture"),
+  liquidMaterialImage: document.querySelector("#liquidMaterialImage"),
   liquidClipPath: document.querySelector("#liquidClipPath"),
+  foamClipPath: document.querySelector("#foamClipPath"),
   foamShape: document.querySelector("#foamShape"),
   foamWetShape: document.querySelector("#foamWetShape"),
   foamTopShape: document.querySelector("#foamTopShape"),
@@ -168,6 +187,11 @@ const elements = {
   lowerLipValue: document.querySelector("#lowerLipValue"),
   physicsStateValue: document.querySelector("#physicsStateValue"),
   audioStateValue: document.querySelector("#audioStateValue"),
+  bubblesScheduledValue: document.querySelector("#bubblesScheduledValue"),
+  bubblesPlayedValue: document.querySelector("#bubblesPlayedValue"),
+  bubbleRateValue: document.querySelector("#bubbleRateValue"),
+  currentHumanSampleValue: document.querySelector("#currentHumanSampleValue"),
+  audioContextStateValue: document.querySelector("#audioContextStateValue"),
   audioFidelityValue: document.querySelector("#audioFidelityValue"),
   appVersionValue: document.querySelector("#appVersionValue"),
   versionLabel: document.querySelector(".version-label"),
@@ -308,6 +332,13 @@ function setEllipseGeometry(element, ellipse) {
   setAttributeValue(element, "ry", String(ellipse.ry));
 }
 
+function setBoxGeometry(element, box) {
+  setAttributeValue(element, "x", String(box.x));
+  setAttributeValue(element, "y", String(box.y));
+  setAttributeValue(element, "width", String(box.width));
+  setAttributeValue(element, "height", String(box.height));
+}
+
 function applyGlassGeometry(drink, geometry) {
   if (renderCache.glassKey === drink.glassKey) return;
   renderCache.glassKey = drink.glassKey;
@@ -317,15 +348,15 @@ function applyGlassGeometry(drink, geometry) {
   setAttributeValue(elements.glassSvg, "viewBox", geometry.viewBox);
   setAttributeValue(elements.cavityClipPath, "d", cavityPath);
   setAttributeValue(elements.cavityOutline, "d", cavityPath);
-  setAttributeValue(elements.glassOuterPath, "d", geometry.outerPath);
-  setAttributeValue(elements.glassWallOverlay, "d", geometry.wallOverlayPath);
-  setAttributeValue(elements.glassEdgeOverlay, "d", geometry.outerPath);
 
-  elements.glassHandleGroup.hidden = !geometry.handlePath;
-  setAttributeValue(elements.glassHandleShadow, "d", geometry.handlePath);
-  setAttributeValue(elements.glassHandleOuter, "d", geometry.handlePath);
-  setAttributeValue(elements.glassHandleInner, "d", geometry.handlePath);
-  setAttributeValue(elements.glassHandleHighlight, "d", geometry.handlePath);
+  [elements.glassPhotoBack, elements.glassPhotoFront].forEach((photo) => {
+    setAttributeValue(photo, "href", geometry.photoHref);
+    setBoxGeometry(photo, geometry.photoBox);
+  });
+  setAttributeValue(elements.liquidMaterialImage, "href", drink.material.textureHref);
+  setBoxGeometry(elements.liquidMaterialImage, geometry.materialBox);
+  setCssVariable("--liquid-material-opacity", String(drink.material.textureOpacity));
+  setEllipseGeometry(elements.glassAmbientShadow, geometry.shadow);
 
   setEllipseGeometry(elements.glassRimOuter, geometry.rim);
   setEllipseGeometry(elements.glassRimInner, {
@@ -571,7 +602,9 @@ function renderLiquidGeometry(force = false) {
   setAttributeValue(elements.liquidLight, "d", liquidPath);
   setAttributeValue(elements.liquidEdge, "d", liquidPath);
   setAttributeValue(elements.liquidClipPath, "d", liquidPath);
-  setAttributeValue(elements.foamShape, "d", polygonToPath(foamBodyPolygon));
+  const foamBodyPath = polygonToPath(foamBodyPolygon);
+  setAttributeValue(elements.foamClipPath, "d", foamBodyPath);
+  setAttributeValue(elements.foamShape, "d", foamBodyPath);
   setAttributeValue(elements.foamWetShape, "d", polygonToPath(foamWetPolygon));
   setAttributeValue(elements.foamTopShape, "d", polygonToPath(foamTopPolygon));
   const meniscusPath = segment
@@ -622,7 +655,7 @@ function renderInterface(syncManualControls = true) {
   if (syncManualControls) syncControls();
 }
 
-// Event-based Web Audio
+// Sample-only Web Audio. Missing licensed recordings stay honestly silent.
 function updateSoundButton() {
   if (audioState.unavailable) {
     elements.soundButton.disabled = true;
@@ -642,20 +675,6 @@ function updateSoundButton() {
   setTextContent(elements.soundIcon, audioState.muted ? "×" : "♪");
 }
 
-function createNoiseBuffer(context) {
-  const sampleRate = context.sampleRate || 44100;
-  const buffer = context.createBuffer(1, sampleRate, sampleRate);
-  const samples = buffer.getChannelData(0);
-  let seed = 48271;
-
-  for (let index = 0; index < samples.length; index += 1) {
-    seed = seed * 16807 % 2147483647;
-    samples[index] = seed / 1073741823.5 - 1;
-  }
-
-  return buffer;
-}
-
 function createAudioEngine() {
   if (audioState.context) return true;
 
@@ -672,10 +691,8 @@ function createAudioEngine() {
     const masterGain = context.createGain();
     masterGain.gain.value = 0;
     masterGain.connect(context.destination);
-
     audioState.context = context;
     audioState.masterGain = masterGain;
-    audioState.noiseBuffer = createNoiseBuffer(context);
     updateSoundButton();
     return true;
   } catch {
@@ -688,6 +705,65 @@ function createAudioEngine() {
   }
 }
 
+function configuredAudioEntries() {
+  return Object.entries(AUDIO_ASSETS).flatMap(([category, assets]) => (
+    assets.map((asset, index) => ({
+      category,
+      href: typeof asset === "string" ? asset : asset.href,
+      label: typeof asset === "string" ? category + "-" + (index + 1) : asset.label
+    }))
+  ));
+}
+
+function decodeAudioBuffer(context, arrayBuffer) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const succeed = (buffer) => {
+      if (settled) return;
+      settled = true;
+      resolve(buffer);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    try {
+      const result = context.decodeAudioData(arrayBuffer, succeed, fail);
+      if (result && typeof result.then === "function") result.then(succeed, fail);
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
+
+async function preloadAudioAssets() {
+  if (audioState.assetsLoading || audioState.assetsReady || !audioState.context) return;
+  const entries = configuredAudioEntries();
+  if (entries.length === 0 || typeof fetch !== "function") return;
+
+  audioState.assetsLoading = true;
+  const decoded = await Promise.all(entries.map(async (entry) => {
+    try {
+      const response = await fetch(entry.href);
+      if (!response.ok) return null;
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = await decodeAudioBuffer(audioState.context, arrayBuffer);
+      return { ...entry, buffer };
+    } catch {
+      return null;
+    }
+  }));
+
+  decoded.filter(Boolean).forEach((sample) => {
+    audioState.buffers[sample.category].push(sample);
+  });
+  audioState.assetsLoading = false;
+  audioState.assetsReady = Object.values(audioState.buffers).some((samples) => samples.length > 0);
+  renderDiagnostics();
+}
+
 function audioCanPlay() {
   return Boolean(
     audioState.interacted
@@ -698,30 +774,34 @@ function audioCanPlay() {
   );
 }
 
-function setMasterVolume(value) {
+function setMasterVolume(volume) {
   const context = audioState.context;
   const gain = audioState.masterGain;
   if (!context || !gain) return;
-  const now = context.currentTime;
-  gain.gain.cancelScheduledValues(now);
-  gain.gain.setValueAtTime(value, now);
+  try {
+    gain.gain.cancelScheduledValues(context.currentTime);
+    gain.gain.setValueAtTime(volume, context.currentTime);
+  } catch {
+    gain.gain.value = volume;
+  }
 }
 
-function disconnectAudioNodes(source, relatedNodes = []) {
+function disconnectAudioNodes(source, relatedNodes) {
   [source, ...relatedNodes].forEach((node) => {
     try {
       node.disconnect();
     } catch {
-      // A stopped or collected node may already be disconnected.
+      // One-shot sources may already be disconnected.
     }
   });
 }
 
-function trackAudioSource(source, relatedNodes = []) {
+function trackAudioSource(source, relatedNodes, onEnded) {
   audioState.activeSources.set(source, relatedNodes);
   source.addEventListener("ended", () => {
     audioState.activeSources.delete(source);
     disconnectAudioNodes(source, relatedNodes);
+    if (typeof onEnded === "function") onEnded();
   }, { once: true });
 }
 
@@ -730,12 +810,14 @@ function stopActiveAudioEvents() {
     try {
       source.stop();
     } catch {
-      // The source may have ended between scheduling and cancellation.
+      // The source may have ended during cancellation.
     }
     disconnectAudioNodes(source, relatedNodes);
   });
   audioState.activeSources.clear();
-  audioState.nextConsumptionEventAt = 0;
+  audioState.bubbleSource = null;
+  audioState.humanSource = null;
+  audioState.currentHumanSample = "none";
 }
 
 function cancelAmbientBubble() {
@@ -744,184 +826,108 @@ function cancelAmbientBubble() {
   audioState.ambientTimerId = null;
 }
 
-function playNoiseBurst({ duration, frequency, filterType, volume, delay = 0 }) {
-  if (!audioCanPlay() || !audioState.noiseBuffer) return;
+function chooseAudioSample(category) {
+  const samples = audioState.buffers[category];
+  if (!samples || samples.length === 0) return null;
+  audioState.eventSequence += 1;
+  let index = Math.floor(seededFraction(audioState.eventSequence * 19 + 7) * samples.length);
+  if (samples.length > 1 && index === audioState.lastSampleIndex[category]) {
+    index = (index + 1) % samples.length;
+  }
+  audioState.lastSampleIndex[category] = index;
+  return samples[index];
+}
+
+function playAudioSample(category, options = {}) {
+  const human = Boolean(options.human);
+  const volume = Number.isFinite(options.volume) ? options.volume : 0.7;
+  if (
+    !audioCanPlay()
+    || (human && audioState.humanSource)
+    || (category === "bubble" && audioState.bubbleSource)
+  ) {
+    return false;
+  }
+  const sample = chooseAudioSample(category);
+  if (!sample) return false;
 
   const context = audioState.context;
   const source = context.createBufferSource();
-  const filter = context.createBiquadFilter();
   const gain = context.createGain();
-  const now = context.currentTime;
-  const startAt = now + Math.max(0, delay);
-  const safeDuration = clamp(duration, 0.04, 0.45);
-
-  source.buffer = audioState.noiseBuffer;
+  source.buffer = sample.buffer;
   source.loop = false;
-  filter.type = filterType;
-  filter.frequency.value = frequency;
-  filter.Q.value = 0.8;
-  gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.018);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + safeDuration);
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(audioState.masterGain);
-  trackAudioSource(source, [filter, gain]);
-  source.start(startAt, seededFraction(audioState.eventSequence + 9) * 0.5, safeDuration);
-  source.stop(startAt + safeDuration + 0.01);
-}
-
-function playToneBurst({ frequency, endFrequency, duration, volume, type = "sine", delay = 0 }) {
-  if (!audioCanPlay()) return;
-
-  const context = audioState.context;
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  const now = context.currentTime;
-  const startAt = now + Math.max(0, delay);
-  const safeDuration = clamp(duration, 0.04, 0.35);
-
-  oscillator.type = type;
-  oscillator.frequency.setValueAtTime(frequency, startAt);
-  oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, endFrequency), startAt + safeDuration);
-  gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.014);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + safeDuration);
-  oscillator.connect(gain);
-  gain.connect(audioState.masterGain);
-  trackAudioSource(oscillator, [gain]);
-  oscillator.start(startAt);
-  oscillator.stop(startAt + safeDuration + 0.01);
-}
-
-function playAmbientBubbleCluster() {
-  const drink = currentDrink();
-  if (!drink || audioState.mode !== "idle-bubbling" || !audioCanPlay()) return;
-
-  audioState.eventSequence += 1;
-  const baseSequence = audioState.eventSequence;
-  const clusterMaximum = simulationState.drinkKey === "cola" ? 3 : 2;
-  const clusterSize = 1 + Math.floor(seededFraction(baseSequence + 13) * clusterMaximum);
-
-  for (let index = 0; index < clusterSize; index += 1) {
-    const variation = 0.86 + seededFraction(baseSequence + index * 17) * 0.3;
-    playToneBurst({
-      frequency: drink.audio.bubblePitch * variation,
-      endFrequency: drink.audio.bubblePitch * variation * (1.18 + index * 0.035),
-      duration: 0.045 + seededFraction(baseSequence + index * 19) * 0.055,
-      volume: (simulationState.drinkKey === "cola" ? 0.012 : 0.0095) * (1 - index * 0.12),
-      type: "sine",
-      delay: index * (0.055 + seededFraction(baseSequence + index * 23) * 0.07)
-    });
+  if (source.playbackRate) {
+    source.playbackRate.value = 0.97 + seededFraction(audioState.eventSequence * 23 + 3) * 0.06;
   }
+  gain.gain.value = volume;
+  source.connect(gain);
+  const relatedNodes = [gain];
+  if (category === "bubble" && typeof context.createStereoPanner === "function") {
+    const panner = context.createStereoPanner();
+    panner.pan.value = -0.16 + seededFraction(audioState.eventSequence * 31 + 5) * 0.32;
+    gain.connect(panner);
+    panner.connect(audioState.masterGain);
+    relatedNodes.push(panner);
+  } else {
+    gain.connect(audioState.masterGain);
+  }
+
+  if (human) {
+    audioState.humanSource = source;
+    audioState.currentHumanSample = sample.label || sample.href;
+  }
+  if (category === "bubble") audioState.bubbleSource = source;
+  trackAudioSource(source, relatedNodes, () => {
+    if (audioState.bubbleSource === source) audioState.bubbleSource = null;
+    if (audioState.humanSource === source) {
+      audioState.humanSource = null;
+      audioState.currentHumanSample = "none";
+    }
+  });
+  source.start();
+  if (category === "bubble") audioState.bubblesPlayed += 1;
+  return true;
+}
+
+function nextBubbleDelayMs() {
+  audioState.eventSequence += 1;
+  const random = clamp(seededFraction(audioState.eventSequence * 29 + 11), 0.000001, 0.999999);
+  return -Math.log(1 - random) / BUBBLE_RATE_PER_SECOND * 1000;
 }
 
 function scheduleAmbientBubble() {
-  const drink = currentDrink();
   if (
-    !drink
-    || audioState.ambientTimerId !== null
+    audioState.ambientTimerId !== null
     || !audioCanPlay()
     || audioState.mode !== "idle-bubbling"
   ) {
     return;
   }
 
-  const span = drink.audio.ambientMaximumMs - drink.audio.ambientMinimumMs;
-  const delay = drink.audio.ambientMinimumMs
-    + seededFraction(audioState.eventSequence + 31) * span;
+  audioState.bubblesScheduled += 1;
   audioState.ambientTimerId = window.setTimeout(() => {
     audioState.ambientTimerId = null;
-    playAmbientBubbleCluster();
-    scheduleAmbientBubble();
-  }, delay);
-}
-
-function playSippingEvent(flowRate) {
-  const drink = currentDrink();
-  if (!drink || !audioCanPlay() || audioState.mode !== "sipping") return;
-  audioState.eventSequence += 1;
-  const sequence = audioState.eventSequence;
-  const intensity = clamp(flowRate / 0.2, 0, 1);
-  const variation = 0.9 + seededFraction(sequence + 41) * 0.22;
-
-  playNoiseBurst({
-    duration: 0.12 + intensity * 0.09,
-    frequency: drink.audio.spillPitch * (3.8 + variation),
-    filterType: "bandpass",
-    volume: drink.audio.spillVolume * (0.46 + intensity * 0.34)
-  });
-  playNoiseBurst({
-    duration: 0.075 + seededFraction(sequence + 43) * 0.045,
-    frequency: 1250 + seededFraction(sequence + 47) * 520,
-    filterType: "highpass",
-    volume: 0.008 + intensity * 0.006,
-    delay: 0.035
-  });
-  if (sequence % 3 === 0) {
-    playToneBurst({
-      frequency: drink.audio.spillPitch * variation * 1.05,
-      endFrequency: drink.audio.spillPitch * variation * 0.82,
-      duration: 0.09 + intensity * 0.04,
-      volume: 0.009 + intensity * 0.006,
-      type: "sine",
-      delay: 0.025
-    });
-  }
-}
-
-function playChuggingEvent(flowRate) {
-  const drink = currentDrink();
-  if (!drink || !audioCanPlay() || audioState.mode !== "chugging") return;
-  audioState.eventSequence += 1;
-  const sequence = audioState.eventSequence;
-  const intensity = clamp(flowRate / 0.2, 0, 1);
-  const pulseCount = 2 + Math.floor(seededFraction(sequence + 53) * 2);
-
-  playNoiseBurst({
-    duration: 0.2 + intensity * 0.14,
-    frequency: drink.audio.spillPitch * 3.25,
-    filterType: "bandpass",
-    volume: drink.audio.spillVolume * (0.72 + intensity * 0.42)
-  });
-
-  for (let index = 0; index < pulseCount; index += 1) {
-    const variation = 0.84 + seededFraction(sequence + index * 29) * 0.22;
-    const delay = 0.045 + index * (0.085 + seededFraction(sequence + index * 31) * 0.045);
-    playToneBurst({
-      frequency: drink.audio.spillPitch * variation,
-      endFrequency: drink.audio.spillPitch * variation * 0.62,
-      duration: 0.1 + intensity * 0.055,
-      volume: 0.015 + intensity * 0.012,
-      type: "triangle",
-      delay
-    });
-  }
-}
-
-function playRefillEvent() {
-  const drink = currentDrink();
-  if (!drink) return;
-  audioState.eventSequence += 1;
-  playNoiseBurst({
-    duration: 0.32,
-    frequency: simulationState.drinkKey === "cola" ? 720 : 980,
-    filterType: "bandpass",
-    volume: 0.032
-  });
-  playToneBurst({
-    frequency: drink.audio.spillPitch * 1.25,
-    endFrequency: drink.audio.spillPitch * 1.7,
-    duration: 0.19,
-    volume: 0.022,
-    type: "sine"
-  });
+    if (audioState.mode === "idle-bubbling" && audioCanPlay()) {
+      const volume = 0.34 + seededFraction(audioState.eventSequence * 37 + 13) * 0.16;
+      playAudioSample("bubble", { volume });
+      scheduleAmbientBubble();
+    }
+  }, nextBubbleDelayMs());
 }
 
 function hasRealAudioFlow() {
   return simulationState.physicsStatus === "spilling"
     && simulationState.overflowAmount > FLOW_AUDIO_EPSILON
     && simulationState.flowRate > 0;
+}
+
+function updateUprightLatch() {
+  const absoluteTilt = Math.abs(sensorState.clampedSideTilt);
+  if (audioState.uprightLatched) {
+    if (absoluteTilt > UPRIGHT_EXIT_DEGREES) audioState.uprightLatched = false;
+  } else if (absoluteTilt <= UPRIGHT_ENTER_DEGREES) {
+    audioState.uprightLatched = true;
+  }
 }
 
 function determineAudioMode() {
@@ -943,10 +949,8 @@ function determineAudioMode() {
     return audioState.consumptionMode;
   }
 
-  if (
-    simulationState.fillLevel > 0.05
-    && Math.abs(sensorState.clampedSideTilt) <= AMBIENT_TILT_LIMIT
-  ) {
+  updateUprightLatch();
+  if (simulationState.fillLevel > 0.05 && audioState.uprightLatched) {
     return "idle-bubbling";
   }
   return "tilted-no-flow";
@@ -958,24 +962,60 @@ function transitionAudioMode(nextMode) {
     return;
   }
 
-  const previousMode = audioState.mode;
-  if (previousMode === "idle-bubbling") cancelAmbientBubble();
+  cancelAmbientBubble();
   stopActiveAudioEvents();
-
+  audioState.bubbleObservationStartedAt = null;
   audioState.mode = nextMode;
   if (nextMode !== "sipping" && nextMode !== "chugging") {
     audioState.consumptionMode = "sipping";
   }
-  if (nextMode !== "idle-bubbling") cancelAmbientBubble();
-  if (nextMode === "idle-bubbling") scheduleAmbientBubble();
+  if (nextMode === "idle-bubbling") {
+    audioState.bubbleObservationStartedAt = currentFrameTime();
+    audioState.bubbleObservationPlayedBase = audioState.bubblesPlayed;
+    scheduleAmbientBubble();
+  }
 }
 
 function syncAudioScheduling() {
   transitionAudioMode(determineAudioMode());
 }
 
+function scheduleHumanAudio() {
+  if (!hasRealAudioFlow() || !audioCanPlay() || audioState.humanSource) return;
+  if (audioState.mode !== "sipping" && audioState.mode !== "chugging") return;
+  const samples = audioState.buffers[audioState.mode];
+  if (!samples || samples.length === 0) {
+    audioState.currentHumanSample = "licensed sample pending";
+    return;
+  }
+  const intensity = clamp(simulationState.flowRate / 0.2, 0.12, 1);
+  playAudioSample(audioState.mode, {
+    human: true,
+    volume: 0.46 + intensity * 0.34
+  });
+}
+
+function playRefillEvent() {
+  playAudioSample("refill", { volume: 0.62 });
+}
+
 function audioDiagnosticState() {
   return determineAudioMode();
+}
+
+function audioContextState() {
+  return audioState.context ? audioState.context.state : "not-created";
+}
+
+function observedBubbleRate() {
+  if (audioState.bubbleObservationStartedAt === null) return 0;
+  const elapsedSeconds = Math.max(
+    0.001,
+    (currentFrameTime() - audioState.bubbleObservationStartedAt) / 1000
+  );
+  return (
+    audioState.bubblesPlayed - audioState.bubbleObservationPlayedBase
+  ) / elapsedSeconds;
 }
 
 function resumeAudioContext() {
@@ -1004,6 +1044,7 @@ function resumeAudioContext() {
 function enableAudioFromUserGesture() {
   audioState.interacted = true;
   if (!createAudioEngine()) return;
+  void preloadAudioAssets();
   resumeAudioContext();
 }
 
@@ -1097,24 +1138,6 @@ function updateFilteredSideTilt(deltaTime) {
   updateMappedSideTilt();
 }
 
-function scheduleConsumptionAudio(timestamp) {
-  if (!hasRealAudioFlow() || !audioCanPlay()) return;
-  if (audioState.mode !== "sipping" && audioState.mode !== "chugging") return;
-  if (timestamp < audioState.nextConsumptionEventAt) return;
-
-  const intensity = clamp(simulationState.flowRate / 0.2, 0, 1);
-  const randomness = seededFraction(audioState.eventSequence + 57);
-  if (audioState.mode === "chugging") {
-    playChuggingEvent(simulationState.flowRate);
-    audioState.nextConsumptionEventAt = timestamp
-      + 330 + (1 - intensity) * 150 + randomness * 150;
-  } else {
-    playSippingEvent(simulationState.flowRate);
-    audioState.nextConsumptionEventAt = timestamp
-      + 430 + (1 - intensity) * 260 + randomness * 210;
-  }
-}
-
 function startAnimationLoop() {
   if (!simulationState.drinkKey || simulationState.animationFrameId !== null) return;
   simulationState.lastFrameTime = null;
@@ -1190,7 +1213,7 @@ function animateSimulation(timestamp) {
   renderLiquidGeometry();
   renderInterface(false);
   syncAudioScheduling();
-  scheduleConsumptionAudio(timestamp);
+  scheduleHumanAudio();
 
   if (
     simulationState.diagnosticsOpen
@@ -1487,7 +1510,15 @@ function renderDiagnostics() {
   setTextContent(elements.lowerLipValue, simulationState.lowerLip);
   setTextContent(elements.physicsStateValue, simulationState.physicsStatus);
   setTextContent(elements.audioStateValue, audioDiagnosticState());
-  setTextContent(elements.audioFidelityValue, "procedural fallback");
+  setTextContent(elements.bubblesScheduledValue, String(audioState.bubblesScheduled));
+  setTextContent(elements.bubblesPlayedValue, String(audioState.bubblesPlayed));
+  setTextContent(elements.bubbleRateValue, `${observedBubbleRate().toFixed(3)}/s`);
+  setTextContent(elements.currentHumanSampleValue, audioState.currentHumanSample);
+  setTextContent(elements.audioContextStateValue, audioContextState());
+  setTextContent(
+    elements.audioFidelityValue,
+    audioState.assetsReady ? "local licensed samples" : "silent — licensed recordings pending"
+  );
   setTextContent(elements.appVersionValue, APP_VERSION);
   setAttributeValue(
     elements.enableMotionButton,
@@ -1531,7 +1562,12 @@ function diagnosticsText() {
     `Lower lip: ${simulationState.lowerLip}`,
     `Physics state: ${simulationState.physicsStatus}`,
     `Audio state: ${audioDiagnosticState()}`,
-    "Audio fidelity: procedural fallback; human samples pending"
+    `Bubbles scheduled: ${audioState.bubblesScheduled}`,
+    `Bubbles played: ${audioState.bubblesPlayed}`,
+    `Observed bubble rate: ${observedBubbleRate().toFixed(3)}/s`,
+    `AudioContext state: ${audioContextState()}`,
+    `Current human sample: ${audioState.currentHumanSample}`,
+    `Audio fidelity: ${audioState.assetsReady ? "local licensed samples" : "silent — licensed recordings pending"}`
   ].join("\n");
 }
 
